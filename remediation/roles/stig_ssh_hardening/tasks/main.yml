@@ -54,7 +54,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^ClientAliveInterval'
     line: "ClientAliveInterval {{ stig_ssh_client_alive_interval }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258019, cat2, sc-10]
 
 - name: V-258020 | CAT II | SC-10 | Set ClientAliveCountMax
@@ -62,7 +64,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^ClientAliveCountMax'
     line: "ClientAliveCountMax {{ stig_ssh_client_alive_count_max }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258020, cat2, sc-10]
 
 - name: V-258021 | CAT II | AC-17(2) | Set LoginGraceTime
@@ -70,7 +74,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^LoginGraceTime'
     line: "LoginGraceTime {{ stig_ssh_login_grace_time }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258021, cat2, ac-17]
 
 - name: V-258022 | CAT II | AC-7 | Set MaxAuthTries
@@ -78,7 +84,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^MaxAuthTries'
     line: "MaxAuthTries {{ stig_ssh_max_auth_tries }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258022, cat2, ac-7]
 
 # --- Access Controls ---
@@ -88,7 +96,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^PermitRootLogin'
     line: "PermitRootLogin {{ stig_ssh_permit_root_login }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258023, cat1, ac-6]
 
 - name: V-258024 | CAT I | IA-5(1) | Disable empty passwords
@@ -96,7 +106,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^PermitEmptyPasswords'
     line: "PermitEmptyPasswords {{ stig_ssh_permit_empty_passwords }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258024, cat1, ia-5]
 
 - name: V-258025 | CAT II | CM-6 | Disable user environment processing
@@ -104,7 +116,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^PermitUserEnvironment'
     line: "PermitUserEnvironment {{ stig_ssh_permit_user_environment }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258025, cat2, cm-6]
 
 - name: V-258026 | CAT II | CM-6 | Enable PAM
@@ -112,7 +126,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^UsePAM'
     line: "UsePAM {{ stig_ssh_use_pam }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258026, cat2, cm-6]
 
 - name: V-258027 | CAT II | CM-6 | Disable X11 forwarding
@@ -120,7 +136,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^X11Forwarding'
     line: "X11Forwarding {{ stig_ssh_x11_forwarding }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258027, cat2, cm-6]
 
 - name: V-258028 | CAT II | CM-6 | Set compression to delayed
@@ -128,7 +146,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^Compression'
     line: "Compression {{ stig_ssh_compression }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258028, cat2, cm-6]
 
 - name: V-258029 | CAT II | CM-6 | Disable host-based authentication
@@ -136,7 +156,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^HostbasedAuthentication'
     line: "HostbasedAuthentication {{ stig_ssh_hostbased_auth }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258029, cat2, cm-6]
 
 - name: V-258030 | CAT II | AC-6 | Enable strict mode
@@ -144,7 +166,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^StrictModes'
     line: "StrictModes {{ stig_ssh_strict_modes }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258030, cat2, ac-6]
 
 # --- Banner ---
@@ -154,7 +178,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^Banner'
     line: "Banner {{ stig_ssh_banner }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258031, cat2, ac-8]
 
 - name: V-258031 | CAT II | AC-8 | Deploy DoD consent banner
@@ -199,7 +225,9 @@
     path: /etc/ssh/sshd_config
     regexp: '^RekeyLimit'
     line: "RekeyLimit {{ stig_ssh_rekey_limit }}"
-  notify: Restart sshd
+  notify:
+    - Validate sshd config
+    - Restart sshd
   tags: [V-258032, cat2, sc-8]
 
 # --- Verification tasks ---

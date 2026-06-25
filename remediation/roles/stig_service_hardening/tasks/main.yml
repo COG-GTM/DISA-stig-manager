@@ -81,7 +81,7 @@
     cmd: "firewall-cmd --set-default-zone={{ stig_firewalld_default_zone }}"
   register: firewall_zone_result
   changed_when: "'success' in firewall_zone_result.stdout"
-  failed_when: false
+  failed_when: firewall_zone_result.rc != 0 and 'ALREADY_SET' not in firewall_zone_result.stderr
   tags: [V-258130, cat2, sc-7]
 
 - name: V-258131 | CAT II | SC-7 | Allow only required services through firewall

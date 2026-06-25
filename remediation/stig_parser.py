@@ -25,6 +25,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
+try:
+    from defusedxml import ElementTree as SafeET
+except ImportError:
+    SafeET = None
+
 
 # CCI to NIST 800-53 control mapping (subset covering common RHEL 9 STIG controls)
 CCI_TO_NIST = {
@@ -168,7 +173,9 @@ def parse_xccdf(xml_path: str) -> list:
     Returns:
         List of STIGRule objects.
     """
-    tree = ET.parse(xml_path)
+    # Use defusedxml if available to prevent entity expansion DoS attacks
+    parser = SafeET if SafeET else ET
+    tree = parser.parse(xml_path)
     root = tree.getroot()
 
     # Detect namespace

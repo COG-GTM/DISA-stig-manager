@@ -61,7 +61,7 @@
           STIG Version: {{ stig_version }}
           Target Host:  {{ inventory_hostname }}
           Start Time:   {{ stig_remediation_start }}
-          End Time:     {{ ansible_date_time.iso8601 }}
+          End Time:     {{ now(utc=true).isoformat() }}
           Run ID:       {{ remediation_run_id }}
           ============================================
       tags: always
