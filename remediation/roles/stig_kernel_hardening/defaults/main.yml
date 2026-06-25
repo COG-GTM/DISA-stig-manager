@@ -1,0 +1,94 @@
+---
+# DISA RHEL 9 STIG - Kernel Hardening Defaults
+# NIST 800-53: CM-6, SC-7, SI-16
+
+# Sysctl parameters mapped to STIG requirements
+stig_kernel_params:
+  # V-258080: Enable ASLR
+  kernel.randomize_va_space: 2
+
+  # V-258081: Restrict kernel pointer exposure
+  kernel.kptr_restrict: 1
+
+  # V-258082: Restrict dmesg access
+  kernel.dmesg_restrict: 1
+
+  # V-258083: Restrict kernel perf events
+  kernel.perf_event_paranoid: 2
+
+  # V-258084: Disable core dumps for SUID programs
+  fs.suid_dumpable: 0
+
+  # V-258085: Disable IPv4 forwarding (non-routers)
+  net.ipv4.ip_forward: 0
+
+  # V-258086: Disable IPv4 source routing
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+
+  # V-258087: Disable ICMP redirects
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+
+  # V-258088: Disable ICMP redirect sending
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+
+  # V-258089: Enable TCP SYN cookies
+  net.ipv4.tcp_syncookies: 1
+
+  # V-258090: Enable reverse path filtering
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+
+  # V-258091: Log martian packets
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+
+  # V-258092: Ignore ICMP broadcast requests
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+
+  # V-258093: Ignore bogus ICMP errors
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+
+  # V-258094: Disable IPv6 router advertisements
+  net.ipv6.conf.all.accept_ra: 0
+  net.ipv6.conf.default.accept_ra: 0
+
+  # V-258095: Disable IPv6 redirects
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+
+  # V-258096: Disable IPv6 source routing
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.default.accept_source_route: 0
+
+# Kernel modules to disable
+stig_disabled_modules:
+  # V-258097: Disable USB storage
+  - usb-storage
+  # V-258098: Disable Bluetooth
+  - bluetooth
+  # V-258099: Disable FireWire
+  - firewire-core
+  # V-258100: Disable DCCP
+  - dccp
+  # V-258101: Disable SCTP
+  - sctp
+  # V-258102: Disable TIPC
+  - tipc
+  # V-258103: Disable cramfs
+  - cramfs
+  # V-258104: Disable freevxfs
+  - freevxfs
+  # V-258105: Disable hfs
+  - hfs
+  # V-258106: Disable hfsplus
+  - hfsplus
+  # V-258107: Disable squashfs
+  - squashfs
+  # V-258108: Disable udf
+  - udf
+
+# V-258109: Core dump limits
+stig_disable_core_dumps: true

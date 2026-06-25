@@ -1,0 +1,44 @@
+---
+# DISA RHEL 9 STIG - Filesystem Protections Defaults
+# NIST 800-53: CM-6, AC-6, SI-7
+
+# V-258050: Home directory permissions
+stig_home_dir_mode: "0750"
+
+# V-258051: Ensure no world-writable files exist (except allowed)
+stig_world_writable_allowed:
+  - /tmp
+  - /var/tmp
+
+# V-258052: Ensure no unowned files
+stig_check_unowned_files: true
+
+# V-258053: Ensure no ungrouped files
+stig_check_ungrouped_files: true
+
+# V-258054: Disable SUID on non-essential binaries
+stig_allowed_suid:
+  - /usr/bin/su
+  - /usr/bin/sudo
+  - /usr/bin/passwd
+  - /usr/bin/mount
+  - /usr/bin/umount
+  - /usr/bin/newgrp
+  - /usr/bin/gpasswd
+  - /usr/bin/chage
+  - /usr/bin/chsh
+  - /usr/sbin/unix_chkpwd
+  - /usr/sbin/pam_timestamp_check
+  - /usr/libexec/openssh/ssh-keysign
+
+# V-258055: /etc/passwd permissions
+stig_passwd_mode: "0644"
+
+# V-258056: /etc/shadow permissions
+stig_shadow_mode: "0000"
+
+# V-258057: /etc/group permissions
+stig_group_mode: "0644"
+
+# V-258058: /etc/gshadow permissions
+stig_gshadow_mode: "0000"

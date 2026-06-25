@@ -1,0 +1,12 @@
+---
+# Handlers for SSH hardening role
+
+- name: Restart sshd
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted
+
+- name: Validate sshd config
+  ansible.builtin.command:
+    cmd: sshd -t
+  changed_when: false

@@ -1,0 +1,223 @@
+---
+# DISA RHEL 9 STIG - Service Hardening Remediation
+# Controls: CM-7, CM-7(1), CM-6, AU-8, SC-5
+# Covers: V-258120 through V-258145
+
+# --- Disable unnecessary services ---
+
+- name: V-258120 | CAT II | CM-7 | Disable unnecessary services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+    masked: true
+  loop: "{{ stig_disabled_services }}"
+  failed_when: false
+  tags: [V-258120, cat2, cm-7]
+
+# --- Enable required services ---
+
+- name: V-258121 | CAT II | CM-6 | Enable required security services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ stig_enabled_services }}"
+  tags: [V-258121, cat2, cm-6]
+
+# --- Time synchronization (chrony) ---
+
+- name: V-258122 | CAT II | AU-8 | Ensure chrony is installed
+  ansible.builtin.dnf:
+    name: chrony
+    state: present
+  tags: [V-258122, cat2, au-8]
+
+- name: V-258123 | CAT II | AU-8 | Remove ntp (chrony is preferred)
+  ansible.builtin.dnf:
+    name: ntp
+    state: absent
+  tags: [V-258123, cat2, au-8]
+
+- name: V-258124 | CAT II | AU-8 | Deploy chrony base configuration
+  ansible.builtin.copy:
+    dest: /etc/chrony.conf
+    content: |
+      # DISA STIG V-258124/V-258125: Chrony NTP configuration
+      # Managed by Ansible - DISA RHEL 9 STIG remediation
+      # NTP servers are configured via stig_chrony_servers variable
+
+      # Record the rate at which the system clock gains/loses time
+      driftfile /var/lib/chrony/drift
+
+      # Allow the system clock to be stepped in the first three updates
+      makestep 1.0 3
+
+      # Enable kernel synchronization of the real-time clock (RTC)
+      rtcsync
+
+      # Specify directory for log files
+      logdir /var/log/chrony
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chronyd
+  tags: [V-258124, cat2, au-8]
+
+- name: V-258125 | CAT II | AU-8 | Configure chrony NTP servers
+  ansible.builtin.lineinfile:
+    path: /etc/chrony.conf
+    regexp: "^server {{ item.split(' ')[0] }}"
+    line: "server {{ item }}"
+    insertbefore: "^driftfile"
+  loop: "{{ stig_chrony_servers }}"
+  notify: Restart chronyd
+  tags: [V-258125, cat2, au-8]
+
+- name: V-258126 | CAT II | CM-6 | Ensure chrony runs as chrony user
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/chronyd
+    regexp: '^OPTIONS='
+    line: 'OPTIONS="-u {{ stig_chrony_user }}"'
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart chronyd
+  tags: [V-258126, cat2, cm-6]
+
+# --- Firewall (firewalld) ---
+
+- name: V-258127 | CAT II | SC-7 | Ensure firewalld is installed
+  ansible.builtin.dnf:
+    name: firewalld
+    state: present
+  tags: [V-258127, cat2, sc-7]
+
+- name: V-258128 | CAT II | SC-7 | Enable and start firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  tags: [V-258128, cat2, sc-7]
+
+- name: V-258130 | CAT II | SC-7 | Set default firewalld zone to drop
+  ansible.builtin.command:
+    cmd: "firewall-cmd --set-default-zone={{ stig_firewalld_default_zone }}"
+  register: firewall_zone_result
+  changed_when: "'success' in firewall_zone_result.stdout"
+  failed_when: false
+  tags: [V-258130, cat2, sc-7]
+
+- name: V-258131 | CAT II | SC-7 | Allow only required services through firewall
+  ansible.posix.firewalld:
+    service: "{{ item }}"
+    permanent: true
+    immediate: true
+    state: enabled
+    zone: "{{ stig_firewalld_default_zone }}"
+  loop: "{{ stig_firewalld_allowed_services }}"
+  tags: [V-258131, cat2, sc-7]
+
+# --- Ctrl-Alt-Del ---
+
+- name: V-258135 | CAT I | CM-6 | Disable Ctrl-Alt-Delete reboot
+  ansible.builtin.systemd:
+    name: ctrl-alt-del.target
+    masked: true
+  when: stig_disable_ctrl_alt_del
+  notify: Reload systemd daemon
+  tags: [V-258135, cat1, cm-6]
+
+- name: V-258136 | CAT I | CM-6 | Disable Ctrl-Alt-Delete burst action
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ctrl-alt-del.target
+    content: |
+      # DISA STIG V-258136: Ctrl-Alt-Delete disabled
+      [Unit]
+      Description=Disabled (DISA STIG)
+    owner: root
+    group: root
+    mode: "0644"
+  when: stig_disable_ctrl_alt_del
+  notify: Reload systemd daemon
+  tags: [V-258136, cat1, cm-6]
+
+# --- Emergency/rescue mode authentication ---
+
+- name: V-258137 | CAT I | AC-6 | Require authentication for emergency mode
+  ansible.builtin.lineinfile:
+    path: /usr/lib/systemd/system/emergency.service
+    regexp: '^ExecStart='
+    line: "ExecStart=-/usr/lib/systemd/systemd-sulogin-shell emergency"
+  when: stig_emergency_auth
+  tags: [V-258137, cat1, ac-6]
+
+- name: V-258138 | CAT I | AC-6 | Require authentication for rescue mode
+  ansible.builtin.lineinfile:
+    path: /usr/lib/systemd/system/rescue.service
+    regexp: '^ExecStart='
+    line: "ExecStart=-/usr/lib/systemd/systemd-sulogin-shell rescue"
+  when: stig_emergency_auth
+  tags: [V-258138, cat1, ac-6]
+
+# --- Package management security ---
+
+- name: V-258139 | CAT I | SI-7 | Ensure gpgcheck is enabled globally
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^gpgcheck'
+    line: "gpgcheck=1"
+    insertafter: '^\[main\]'
+  tags: [V-258139, cat1, si-7]
+
+- name: V-258140 | CAT I | SI-7 | Ensure repo_gpgcheck is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^repo_gpgcheck'
+    line: "repo_gpgcheck=1"
+    insertafter: '^gpgcheck'
+  tags: [V-258140, cat1, si-7]
+
+- name: V-258141 | CAT II | SI-7 | Ensure localpkg_gpgcheck is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/dnf/dnf.conf
+    regexp: '^localpkg_gpgcheck'
+    line: "localpkg_gpgcheck=1"
+    insertafter: '^repo_gpgcheck'
+  tags: [V-258141, cat2, si-7]
+
+# --- Verification tasks ---
+
+- name: Verify | Firewalld is running
+  ansible.builtin.command:
+    cmd: firewall-cmd --state
+  register: verify_firewalld
+  changed_when: false
+  failed_when: verify_firewalld.stdout != "running"
+  tags: [verify, V-258128]
+
+- name: Verify | Chrony is synchronized
+  ansible.builtin.command:
+    cmd: chronyc tracking
+  register: verify_chrony
+  changed_when: false
+  failed_when: verify_chrony.rc != 0
+  tags: [verify, V-258125]
+
+- name: Verify | Ctrl-Alt-Delete is masked
+  ansible.builtin.command:
+    cmd: systemctl is-enabled ctrl-alt-del.target
+  register: verify_ctrlaltdel
+  changed_when: false
+  failed_when: verify_ctrlaltdel.stdout != "masked"
+  when: stig_disable_ctrl_alt_del
+  tags: [verify, V-258135]
+
+- name: Verify | GPG check is enabled
+  ansible.builtin.command:
+    cmd: grep -c "^gpgcheck=1" /etc/dnf/dnf.conf
+  register: verify_gpgcheck
+  changed_when: false
+  failed_when: verify_gpgcheck.rc != 0
+  tags: [verify, V-258139]

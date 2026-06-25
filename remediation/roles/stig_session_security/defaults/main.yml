@@ -1,0 +1,22 @@
+---
+# DISA RHEL 9 STIG - Session Security Defaults
+# These values align with DISA STIG requirements. Override only if your
+# organization has an approved deviation documented in the POA&M.
+
+# V-257844: Session lock timeout (seconds) - STIG requires 900 (15 min)
+stig_session_lock_timeout: 900
+
+# V-257845: Session lock delay after idle (seconds)
+stig_session_lock_delay: 5
+
+# V-257846: tmux lock command
+stig_tmux_lock_command: "lock-session"
+
+# V-257847: Concurrent session limit per user
+stig_max_concurrent_sessions: 10
+
+# V-257848: Automatic logout for idle CLI sessions (seconds)
+stig_cli_timeout: 900
+
+# V-257849: Session lock must require re-authentication
+stig_lock_require_reauth: true

@@ -1,0 +1,221 @@
+---
+# DISA RHEL 9 STIG - Audit Logging Remediation
+# Controls: AU-2, AU-3, AU-4, AU-5, AU-9, AU-12
+# Covers: V-257950 through V-257990
+
+- name: V-257950 | CAT II | AU-4 | Ensure auditd is installed
+  ansible.builtin.dnf:
+    name:
+      - audit
+      - audit-libs
+    state: present
+  tags: [V-257950, cat2, au-4]
+
+- name: V-257951 | CAT II | AU-4 | Enable and start auditd service
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  tags: [V-257951, cat2, au-4]
+
+- name: V-257952 | CAT II | AU-5 | Configure space_left threshold
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^space_left\s*='
+    line: "space_left = {{ stig_audit_space_left }}"
+  notify: Restart auditd
+  tags: [V-257952, cat2, au-5]
+
+- name: V-257953 | CAT II | AU-5 | Configure space_left_action
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^space_left_action\s*='
+    line: "space_left_action = {{ stig_audit_space_left_action }}"
+  notify: Restart auditd
+  tags: [V-257953, cat2, au-5]
+
+- name: V-257954 | CAT II | AU-5(1) | Configure disk_full_action
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^disk_full_action\s*='
+    line: "disk_full_action = {{ stig_audit_disk_full_action }}"
+  notify: Restart auditd
+  tags: [V-257954, cat2, au-5]
+
+- name: V-257955 | CAT II | AU-4 | Set max_log_file size
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^max_log_file\s*='
+    line: "max_log_file = {{ stig_audit_max_log_file }}"
+  notify: Restart auditd
+  tags: [V-257955, cat2, au-4]
+
+- name: V-257956 | CAT II | AU-4 | Set max_log_file_action
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^max_log_file_action\s*='
+    line: "max_log_file_action = {{ stig_audit_max_log_file_action }}"
+  notify: Restart auditd
+  tags: [V-257956, cat2, au-4]
+
+- name: V-257957 | CAT II | AU-4 | Set num_logs retention
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: '^num_logs\s*='
+    line: "num_logs = {{ stig_audit_num_logs }}"
+  notify: Restart auditd
+  tags: [V-257957, cat2, au-4]
+
+- name: V-257958 | CAT II | AU-9 | Set audit log file permissions
+  ansible.builtin.file:
+    path: /var/log/audit
+    mode: "{{ stig_audit_log_dir_mode }}"
+    owner: root
+    group: root
+  tags: [V-257958, cat2, au-9]
+
+- name: V-257959 | CAT II | AU-12 | Enable audit backlog limit in GRUB
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX='
+    line: 'GRUB_CMDLINE_LINUX="audit=1 audit_backlog_limit={{ stig_audit_backlog_limit }}"'
+    backrefs: false
+  notify: Rebuild initramfs
+  tags: [V-257959, cat2, au-12]
+
+# --- Required audit rules ---
+
+- name: V-257960 | CAT II | AU-12 | Audit privileged commands (su)
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-privileged.rules
+    content: |
+      ## DISA STIG V-257960 through V-257970: Privileged command auditing
+      -a always,exit -F path=/usr/bin/su -F perm=x -F auid>=1000 -F auid!=unset -k privileged-priv_change
+      -a always,exit -F path=/usr/bin/sudo -F perm=x -F auid>=1000 -F auid!=unset -k privileged-priv_change
+      -a always,exit -F path=/usr/bin/chage -F perm=x -F auid>=1000 -F auid!=unset -k privileged-passwd
+      -a always,exit -F path=/usr/bin/gpasswd -F perm=x -F auid>=1000 -F auid!=unset -k privileged-passwd
+      -a always,exit -F path=/usr/bin/newgrp -F perm=x -F auid>=1000 -F auid!=unset -k privileged-priv_change
+      -a always,exit -F path=/usr/bin/chsh -F perm=x -F auid>=1000 -F auid!=unset -k privileged-priv_change
+      -a always,exit -F path=/usr/bin/sudoedit -F perm=x -F auid>=1000 -F auid!=unset -k privileged-priv_change
+      -a always,exit -F path=/usr/sbin/unix_chkpwd -F perm=x -F auid>=1000 -F auid!=unset -k privileged-passwd
+      -a always,exit -F path=/usr/sbin/userhelper -F perm=x -F auid>=1000 -F auid!=unset -k privileged-passwd
+      -a always,exit -F path=/usr/bin/mount -F perm=x -F auid>=1000 -F auid!=unset -k privileged-mount
+      -a always,exit -F path=/usr/bin/umount -F perm=x -F auid>=1000 -F auid!=unset -k privileged-mount
+      -a always,exit -F path=/usr/sbin/postdrop -F perm=x -F auid>=1000 -F auid!=unset -k privileged-unix-update
+      -a always,exit -F path=/usr/sbin/postqueue -F perm=x -F auid>=1000 -F auid!=unset -k privileged-unix-update
+      -a always,exit -F path=/usr/libexec/openssh/ssh-keysign -F perm=x -F auid>=1000 -F auid!=unset -k privileged-ssh
+      -a always,exit -F path=/usr/bin/crontab -F perm=x -F auid>=1000 -F auid!=unset -k privileged-cron
+      -a always,exit -F path=/usr/bin/passwd -F perm=x -F auid>=1000 -F auid!=unset -k privileged-passwd
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257960, cat2, au-12]
+
+- name: V-257971 | CAT II | AU-12 | Audit identity changes
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-identity.rules
+    content: |
+      ## DISA STIG V-257971: Identity and authentication file changes
+      -w /etc/passwd -p wa -k identity
+      -w /etc/shadow -p wa -k identity
+      -w /etc/group -p wa -k identity
+      -w /etc/gshadow -p wa -k identity
+      -w /etc/security/opasswd -p wa -k identity
+      -w /etc/sudoers -p wa -k identity
+      -w /etc/sudoers.d/ -p wa -k identity
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257971, cat2, au-12]
+
+- name: V-257972 | CAT II | AU-12 | Audit login/logout events
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-logins.rules
+    content: |
+      ## DISA STIG V-257972: Login and logout events
+      -w /var/log/lastlog -p wa -k logins
+      -w /var/run/faillock/ -p wa -k logins
+      -w /var/log/tallylog -p wa -k logins
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257972, cat2, au-12]
+
+- name: V-257973 | CAT II | AU-3 | Audit permission and ownership changes
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-perm-mod.rules
+    content: |
+      ## DISA STIG V-257973: Permission and ownership modifications
+      -a always,exit -F arch=b64 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=unset -k perm_mod
+      -a always,exit -F arch=b64 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=unset -k perm_mod
+      -a always,exit -F arch=b64 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -k perm_mod
+      -a always,exit -F arch=b32 -S chmod,fchmod,fchmodat -F auid>=1000 -F auid!=unset -k perm_mod
+      -a always,exit -F arch=b32 -S chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=unset -k perm_mod
+      -a always,exit -F arch=b32 -S setxattr,lsetxattr,fsetxattr,removexattr,lremovexattr,fremovexattr -F auid>=1000 -F auid!=unset -k perm_mod
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257973, cat2, au-3]
+
+- name: V-257974 | CAT II | AU-12 | Audit file deletion events
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-delete.rules
+    content: |
+      ## DISA STIG V-257974: File deletion events
+      -a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k delete
+      -a always,exit -F arch=b32 -S unlink,unlinkat,rename,renameat -F auid>=1000 -F auid!=unset -k delete
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257974, cat2, au-12]
+
+- name: V-257975 | CAT II | AU-12 | Audit kernel module loading
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/stig-modules.rules
+    content: |
+      ## DISA STIG V-257975: Kernel module loading/unloading
+      -w /usr/sbin/insmod -p x -k modules
+      -w /usr/sbin/rmmod -p x -k modules
+      -w /usr/sbin/modprobe -p x -k modules
+      -a always,exit -F arch=b64 -S init_module,finit_module -k modules
+      -a always,exit -F arch=b64 -S delete_module -k modules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257975, cat2, au-12]
+
+- name: V-257976 | CAT II | AU-12 | Make audit rules immutable (must be last)
+  ansible.builtin.copy:
+    dest: /etc/audit/rules.d/99-finalize.rules
+    content: |
+      ## DISA STIG V-257976: Make audit configuration immutable
+      -e 2
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  tags: [V-257976, cat2, au-12]
+
+# --- Verification tasks ---
+
+- name: Verify | Auditd service is running
+  ansible.builtin.command:
+    cmd: systemctl is-active auditd
+  register: verify_auditd
+  changed_when: false
+  failed_when: verify_auditd.stdout != "active"
+  tags: [verify, V-257951]
+
+- name: Verify | Audit rules are loaded
+  ansible.builtin.command:
+    cmd: auditctl -l
+  register: verify_audit_rules
+  changed_when: false
+  failed_when: verify_audit_rules.stdout_lines | length < 10
+  tags: [verify, V-257960]
