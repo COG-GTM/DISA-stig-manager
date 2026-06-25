@@ -10,3 +10,8 @@
   ansible.builtin.command:
     cmd: depmod -a
   changed_when: true
+
+- name: Rebuild initramfs
+  ansible.builtin.command:
+    cmd: dracut -f
+  changed_when: true

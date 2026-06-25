@@ -130,15 +130,10 @@
   tags: [V-258135, cat1, cm-6]
 
 - name: V-258136 | CAT I | CM-6 | Disable Ctrl-Alt-Delete burst action
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/ctrl-alt-del.target
-    content: |
-      # DISA STIG V-258136: Ctrl-Alt-Delete disabled
-      [Unit]
-      Description=Disabled (DISA STIG)
-    owner: root
-    group: root
-    mode: "0644"
+  ansible.builtin.lineinfile:
+    path: /etc/systemd/system.conf
+    regexp: '^(#\s*)?CtrlAltDelBurstAction='
+    line: "CtrlAltDelBurstAction=none"
   when: stig_disable_ctrl_alt_del
   notify: Reload systemd daemon
   tags: [V-258136, cat1, cm-6]
