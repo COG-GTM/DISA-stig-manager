@@ -39,40 +39,15 @@
     state: absent
   tags: [V-258123, cat2, au-8]
 
-- name: V-258124 | CAT II | AU-8 | Deploy chrony base configuration
-  ansible.builtin.copy:
+- name: V-258124/V-258125 | CAT II | AU-8 | Deploy chrony configuration with NTP servers
+  ansible.builtin.template:
+    src: chrony.conf.j2
     dest: /etc/chrony.conf
-    content: |
-      # DISA STIG V-258124/V-258125: Chrony NTP configuration
-      # Managed by Ansible - DISA RHEL 9 STIG remediation
-      # NTP servers are configured via stig_chrony_servers variable
-
-      # Record the rate at which the system clock gains/loses time
-      driftfile /var/lib/chrony/drift
-
-      # Allow the system clock to be stepped in the first three updates
-      makestep 1.0 3
-
-      # Enable kernel synchronization of the real-time clock (RTC)
-      rtcsync
-
-      # Specify directory for log files
-      logdir /var/log/chrony
     owner: root
     group: root
     mode: "0644"
   notify: Restart chronyd
-  tags: [V-258124, cat2, au-8]
-
-- name: V-258125 | CAT II | AU-8 | Configure chrony NTP servers
-  ansible.builtin.lineinfile:
-    path: /etc/chrony.conf
-    regexp: "^server {{ item.split(' ')[0] }}"
-    line: "server {{ item }}"
-    insertbefore: "^driftfile"
-  loop: "{{ stig_chrony_servers }}"
-  notify: Restart chronyd
-  tags: [V-258125, cat2, au-8]
+  tags: [V-258124, V-258125, cat2, au-8]
 
 - name: V-258126 | CAT II | CM-6 | Ensure chrony runs as chrony user
   ansible.builtin.lineinfile:

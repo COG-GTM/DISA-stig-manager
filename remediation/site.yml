@@ -37,19 +37,19 @@
 
   roles:
     - role: stig_session_security
-      tags: [session, cat2, ac-11]
+      tags: [session]
     - role: stig_authentication
-      tags: [auth, cat1, cat2, ia-5]
+      tags: [auth]
     - role: stig_audit_logging
-      tags: [audit, cat2, au-2, au-12]
+      tags: [audit]
     - role: stig_ssh_hardening
-      tags: [ssh, cat1, cat2, sc-8, ac-17]
+      tags: [ssh]
     - role: stig_filesystem
-      tags: [filesystem, cat1, cat2, cm-6]
+      tags: [filesystem]
     - role: stig_kernel_hardening
-      tags: [kernel, cat2, cm-6, sc-7]
+      tags: [kernel]
     - role: stig_service_hardening
-      tags: [services, cat2, cat3, cm-7]
+      tags: [services]
 
   post_tasks:
     - name: Generate remediation summary

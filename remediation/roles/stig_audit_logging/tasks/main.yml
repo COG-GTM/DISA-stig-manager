@@ -74,13 +74,20 @@
     group: root
   tags: [V-257958, cat2, au-9]
 
+- name: V-257959 | CAT II | AU-12 | Check current kernel audit params
+  ansible.builtin.shell:
+    cmd: grubby --info=ALL | grep -q 'audit=1.*audit_backlog_limit={{ stig_audit_backlog_limit }}'
+  register: grubby_check
+  changed_when: false
+  failed_when: false
+  tags: [V-257959, cat2, au-12]
+
 - name: V-257959 | CAT II | AU-12 | Enable audit backlog limit via grubby
   ansible.builtin.command:
     cmd: >
       grubby --update-kernel=ALL
       --args="audit=1 audit_backlog_limit={{ stig_audit_backlog_limit }}"
-  register: grubby_result
-  changed_when: grubby_result.rc == 0
+  when: grubby_check.rc != 0
   tags: [V-257959, cat2, au-12]
 
 # --- Required audit rules ---

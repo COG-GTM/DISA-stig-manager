@@ -77,16 +77,34 @@
 
 # --- Mount options for /tmp and /var/tmp ---
 
-- name: V-258060 | CAT II | CM-6 | Ensure /tmp is mounted with noexec
+- name: V-258060 | CAT II | CM-6 | Check if /tmp has a dedicated partition
+  ansible.builtin.shell:
+    cmd: findmnt -n -o SOURCE /tmp 2>/dev/null || echo "none"
+  register: tmp_mount_source
+  changed_when: false
+  tags: [V-258060, cat2, cm-6]
+
+- name: V-258060 | CAT II | CM-6 | Ensure /tmp is mounted with noexec (tmpfs)
   ansible.posix.mount:
     path: /tmp
     src: tmpfs
     fstype: tmpfs
     opts: "defaults,nodev,nosuid,noexec,size=2G"
     state: mounted
+  when: tmp_mount_source.stdout == "none" or tmp_mount_source.stdout == "tmpfs"
   tags: [V-258060, cat2, cm-6]
 
-- name: V-258061 | CAT II | CM-6 | Ensure /var/tmp is bind-mounted from /tmp
+- name: V-258060 | CAT II | CM-6 | Add noexec to existing /tmp partition
+  ansible.posix.mount:
+    path: /tmp
+    src: "{{ tmp_mount_source.stdout }}"
+    fstype: "{{ ansible_mounts | selectattr('mount', 'equalto', '/tmp') | map(attribute='fstype') | first | default('ext4') }}"
+    opts: "defaults,nodev,nosuid,noexec"
+    state: mounted
+  when: tmp_mount_source.stdout != "none" and tmp_mount_source.stdout != "tmpfs"
+  tags: [V-258060, cat2, cm-6]
+
+- name: V-258061 | CAT II | CM-6 | Ensure /var/tmp is bind-mounted with noexec
   ansible.posix.mount:
     path: /var/tmp
     src: /tmp
