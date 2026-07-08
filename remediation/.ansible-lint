@@ -1,0 +1,21 @@
+---
+# ansible-lint configuration for DISA STIG remediation roles
+# Some rules are intentionally skipped for operational reasons:
+#
+# var-naming[no-role-prefix]: We use a flat stig_* namespace so users can
+# override variables from a single group_vars file across all roles.
+#
+# command-instead-of-module: Verification tasks intentionally use raw
+# commands to validate system state exactly as DISA auditors would check.
+#
+# risky-shell-pipe: Shell pipes in find/grep commands are required for
+# the specific audit checks defined by DISA.
+
+skip_list:
+  - var-naming[no-role-prefix]
+  - command-instead-of-module
+  - risky-shell-pipe
+  - no-changed-when
+
+warn_list:
+  - name[template]

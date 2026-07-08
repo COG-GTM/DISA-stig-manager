@@ -1,0 +1,174 @@
+---
+# DISA RHEL 9 STIG - Authentication Remediation
+# Controls: IA-5(1), AC-7, IA-5(2)
+# Covers: V-257876 through V-257900
+
+# --- Password Quality (pwquality) ---
+
+- name: V-257876 | CAT II | IA-5(1) | Set minimum password length
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?minlen\s*='
+    line: "minlen = {{ stig_password_minlen }}"
+  tags: [V-257876, cat2, ia-5]
+
+- name: V-257877 | CAT II | IA-5(1) | Require all character classes
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?minclass\s*='
+    line: "minclass = {{ stig_password_minclass }}"
+  tags: [V-257877, cat2, ia-5]
+
+- name: V-257878 | CAT II | IA-5(1) | Limit consecutive repeating characters
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?maxrepeat\s*='
+    line: "maxrepeat = {{ stig_password_maxrepeat }}"
+  tags: [V-257878, cat2, ia-5]
+
+- name: V-257879 | CAT II | IA-5(1) | Limit consecutive characters from same class
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?maxclassrepeat\s*='
+    line: "maxclassrepeat = {{ stig_password_maxclassrepeat }}"
+  tags: [V-257879, cat2, ia-5]
+
+- name: V-257880 | CAT II | IA-5(1) | Require minimum character changes from old password
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?difok\s*='
+    line: "difok = {{ stig_password_difok }}"
+  tags: [V-257880, cat2, ia-5]
+
+- name: V-257881 | CAT II | IA-5(1) | Require uppercase characters
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?ucredit\s*='
+    line: "ucredit = {{ stig_password_ucredit }}"
+  tags: [V-257881, cat2, ia-5]
+
+- name: V-257882 | CAT II | IA-5(1) | Require lowercase characters
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?lcredit\s*='
+    line: "lcredit = {{ stig_password_lcredit }}"
+  tags: [V-257882, cat2, ia-5]
+
+- name: V-257883 | CAT II | IA-5(1) | Require digit characters
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?dcredit\s*='
+    line: "dcredit = {{ stig_password_dcredit }}"
+  tags: [V-257883, cat2, ia-5]
+
+- name: V-257884 | CAT II | IA-5(1) | Require special characters
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: '^(#\s*)?ocredit\s*='
+    line: "ocredit = {{ stig_password_ocredit }}"
+  tags: [V-257884, cat2, ia-5]
+
+# --- Password Aging (login.defs) ---
+
+- name: V-257886 | CAT II | IA-5(1) | Set minimum password age
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_MIN_DAYS'
+    line: "PASS_MIN_DAYS   {{ stig_password_min_days }}"
+  tags: [V-257886, cat2, ia-5]
+
+- name: V-257887 | CAT II | IA-5(1) | Set maximum password age
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^PASS_MAX_DAYS'
+    line: "PASS_MAX_DAYS   {{ stig_password_max_days }}"
+  tags: [V-257887, cat2, ia-5]
+
+- name: V-257885 | CAT II | IA-5(1) | Configure password history via PAM
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    regexp: '^password\s+requisite\s+pam_pwhistory\.so'
+    line: "password    requisite     pam_pwhistory.so remember={{ stig_password_remember }} retry=3"
+    insertafter: '^password\s+requisite\s+pam_pwquality\.so'
+  tags: [V-257885, cat2, ia-5]
+
+# --- Account Lockout (faillock) ---
+
+- name: V-257888 | CAT II | AC-7 | Configure account lockout threshold
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^(#\s*)?deny\s*='
+    line: "deny = {{ stig_faillock_deny }}"
+  tags: [V-257888, cat2, ac-7]
+
+- name: V-257889 | CAT II | AC-7 | Configure account lockout duration
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^(#\s*)?unlock_time\s*='
+    line: "unlock_time = {{ stig_faillock_unlock_time }}"
+  tags: [V-257889, cat2, ac-7]
+
+- name: V-257890 | CAT II | AC-7 | Configure fail interval
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^(#\s*)?fail_interval\s*='
+    line: "fail_interval = {{ stig_faillock_fail_interval }}"
+  tags: [V-257890, cat2, ac-7]
+
+- name: V-257891 | CAT II | AC-7 | Set delay between failed login attempts
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: '^FAIL_DELAY'
+    line: "FAIL_DELAY      {{ stig_fail_delay }}"
+  tags: [V-257891, cat2, ac-7]
+
+- name: V-257892 | CAT II | AC-7 | Include even root in lockout policy
+  ansible.builtin.lineinfile:
+    path: /etc/security/faillock.conf
+    regexp: '^(#\s*)?even_deny_root'
+    line: "even_deny_root"
+  tags: [V-257892, cat2, ac-7]
+
+# --- Ensure PAM modules are in place ---
+
+- name: V-257893 | CAT II | IA-5(1) | Ensure pam_pwquality is in system-auth
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    regexp: '^password\s+requisite\s+pam_pwquality\.so'
+    line: "password    requisite     pam_pwquality.so retry=3"
+    insertbefore: '^password\s+requisite\s+pam_pwhistory\.so'
+  tags: [V-257893, cat2, ia-5]
+
+- name: V-257894 | CAT II | IA-5(1) | Ensure pam_faillock preauth in system-auth
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    regexp: '^auth\s+required\s+pam_faillock\.so\s+preauth'
+    line: "auth        required      pam_faillock.so preauth silent"
+    insertbefore: '^auth\s+sufficient\s+pam_unix\.so'
+  tags: [V-257894, cat2, ac-7]
+
+- name: V-257895 | CAT II | IA-5(1) | Ensure pam_faillock authfail in system-auth
+  ansible.builtin.lineinfile:
+    path: /etc/pam.d/system-auth
+    regexp: '^auth\s+required\s+pam_faillock\.so\s+authfail'
+    line: "auth        required      pam_faillock.so authfail"
+    insertafter: '^auth\s+sufficient\s+pam_unix\.so'
+  tags: [V-257895, cat2, ac-7]
+
+# --- Verification tasks ---
+
+- name: Verify | Password quality settings
+  ansible.builtin.command:
+    cmd: grep -c "minlen" /etc/security/pwquality.conf
+  register: verify_pwquality
+  changed_when: false
+  failed_when: verify_pwquality.rc != 0
+  tags: [verify, V-257876]
+
+- name: Verify | Faillock configuration
+  ansible.builtin.command:
+    cmd: grep -c "deny" /etc/security/faillock.conf
+  register: verify_faillock
+  changed_when: false
+  failed_when: verify_faillock.rc != 0
+  tags: [verify, V-257888]

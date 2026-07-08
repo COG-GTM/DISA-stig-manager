@@ -1,0 +1,67 @@
+---
+# DISA RHEL 9 STIG Remediation - Master Playbook
+# Generated from DISA RHEL 9 STIG V2R2 (October 2024)
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts.yml site.yml
+#   ansible-playbook -i inventory/hosts.yml site.yml --tags "cat1"         # CAT I only
+#   ansible-playbook -i inventory/hosts.yml site.yml --tags "ssh"          # SSH hardening only
+#   ansible-playbook -i inventory/hosts.yml site.yml --check               # Dry run
+#
+# Each role corresponds to a STIG security domain and can be run independently.
+
+- name: DISA RHEL 9 STIG Remediation
+  hosts: rhel9_servers
+  become: true
+  gather_facts: true
+
+  vars:
+    stig_version: "RHEL 9 STIG V2R2"
+    stig_date: "2024-10-24"
+    remediation_run_id: "{{ ansible_date_time.iso8601_basic_short }}"
+
+  pre_tasks:
+    - name: Verify target is RHEL 9
+      ansible.builtin.assert:
+        that:
+          - ansible_os_family == "RedHat"
+          - ansible_distribution_major_version == "9"
+        fail_msg: "This playbook targets RHEL 9 only. Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+        success_msg: "Target confirmed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      tags: always
+
+    - name: Record remediation start time
+      ansible.builtin.set_fact:
+        stig_remediation_start: "{{ ansible_date_time.iso8601 }}"
+      tags: always
+
+  roles:
+    - role: stig_session_security
+      tags: [session]
+    - role: stig_authentication
+      tags: [auth]
+    - role: stig_audit_logging
+      tags: [audit]
+    - role: stig_ssh_hardening
+      tags: [ssh]
+    - role: stig_filesystem
+      tags: [filesystem]
+    - role: stig_kernel_hardening
+      tags: [kernel]
+    - role: stig_service_hardening
+      tags: [services]
+
+  post_tasks:
+    - name: Generate remediation summary
+      ansible.builtin.debug:
+        msg: |
+          ============================================
+          DISA STIG Remediation Complete
+          ============================================
+          STIG Version: {{ stig_version }}
+          Target Host:  {{ inventory_hostname }}
+          Start Time:   {{ stig_remediation_start }}
+          End Time:     {{ now(utc=true).isoformat() }}
+          Run ID:       {{ remediation_run_id }}
+          ============================================
+      tags: always

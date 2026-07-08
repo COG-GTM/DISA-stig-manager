@@ -1,0 +1,71 @@
+---
+# DISA RHEL 9 STIG - SSH Hardening Defaults
+# NIST 800-53: SC-8, SC-13, AC-17(2), IA-7
+
+# V-258015: SSH protocol version (only v2 allowed)
+stig_ssh_protocol: 2
+
+# V-258016: Permitted ciphers (FIPS 140-2/3 validated)
+stig_ssh_ciphers:
+  - aes256-gcm@openssh.com
+  - aes256-ctr
+  - aes128-gcm@openssh.com
+  - aes128-ctr
+
+# V-258017: Permitted MACs
+stig_ssh_macs:
+  - hmac-sha2-512
+  - hmac-sha2-512-etm@openssh.com
+  - hmac-sha2-256
+  - hmac-sha2-256-etm@openssh.com
+
+# V-258018: Key exchange algorithms
+stig_ssh_kex_algorithms:
+  - ecdh-sha2-nistp256
+  - ecdh-sha2-nistp384
+  - ecdh-sha2-nistp521
+  - diffie-hellman-group14-sha256
+  - diffie-hellman-group16-sha512
+  - diffie-hellman-group18-sha512
+
+# V-258019: Client alive interval (seconds)
+stig_ssh_client_alive_interval: 600
+
+# V-258020: Client alive count max
+stig_ssh_client_alive_count_max: 1
+
+# V-258021: Login grace time (seconds)
+stig_ssh_login_grace_time: 60
+
+# V-258022: Max authentication attempts
+stig_ssh_max_auth_tries: 4
+
+# V-258023: Disable root login via SSH
+stig_ssh_permit_root_login: "no"
+
+# V-258024: Disable empty passwords
+stig_ssh_permit_empty_passwords: "no"
+
+# V-258025: Disable environment processing
+stig_ssh_permit_user_environment: "no"
+
+# V-258026: Use privilege separation
+stig_ssh_use_pam: "yes"
+
+# V-258027: Disable X11 forwarding
+stig_ssh_x11_forwarding: "no"
+
+# V-258028: Compression setting
+stig_ssh_compression: "delayed"
+
+# V-258029: Disable host-based authentication
+stig_ssh_hostbased_auth: "no"
+
+# V-258030: Strict mode checking
+stig_ssh_strict_modes: "yes"
+
+# V-258031: SSH banner path
+stig_ssh_banner: "/etc/issue.net"
+
+# V-258032: Rekey limit
+stig_ssh_rekey_limit: "1G 1h"

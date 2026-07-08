@@ -1,0 +1,51 @@
+---
+# DISA RHEL 9 STIG - Authentication Defaults
+# NIST 800-53: IA-5(1), AC-7
+
+# V-257876: Minimum password length
+stig_password_minlen: 15
+
+# V-257877: Minimum character classes (complexity)
+stig_password_minclass: 4
+
+# V-257878: Maximum consecutive repeating characters
+stig_password_maxrepeat: 3
+
+# V-257879: Maximum consecutive characters from same class
+stig_password_maxclassrepeat: 4
+
+# V-257880: Minimum different characters from previous password
+stig_password_difok: 8
+
+# V-257881: Minimum uppercase characters
+stig_password_ucredit: -1
+
+# V-257882: Minimum lowercase characters
+stig_password_lcredit: -1
+
+# V-257883: Minimum digit characters
+stig_password_dcredit: -1
+
+# V-257884: Minimum special characters
+stig_password_ocredit: -1
+
+# V-257885: Password history (remember N previous)
+stig_password_remember: 5
+
+# V-257886: Minimum password lifetime (days)
+stig_password_min_days: 1
+
+# V-257887: Maximum password lifetime (days)
+stig_password_max_days: 60
+
+# V-257888: Account lockout threshold (failed attempts)
+stig_faillock_deny: 3
+
+# V-257889: Account lockout duration (seconds), 0 = until admin unlocks
+stig_faillock_unlock_time: 0
+
+# V-257890: Fail interval window (seconds)
+stig_faillock_fail_interval: 900
+
+# V-257891: Delay between failed login attempts (seconds)
+stig_fail_delay: 4

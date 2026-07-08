@@ -1,0 +1,30 @@
+---
+# DISA RHEL 9 STIG - Audit Logging Defaults
+# NIST 800-53: AU-2, AU-3, AU-4, AU-5, AU-9, AU-12
+
+# V-257950: Audit log storage capacity (MB)
+stig_audit_space_left: 25
+
+# V-257951: Action when audit storage is low
+stig_audit_space_left_action: email
+
+# V-257952: Action when audit disk is full
+stig_audit_disk_full_action: halt
+
+# V-257953: Maximum audit log file size (MB)
+stig_audit_max_log_file: 8
+
+# V-257954: Number of audit log files to retain
+stig_audit_num_logs: 5
+
+# V-257955: Action when max log file size reached
+stig_audit_max_log_file_action: rotate
+
+# V-257956: Audit log directory permissions
+stig_audit_log_dir_mode: "0750"
+
+# V-257957: Audit log file permissions
+stig_audit_log_mode: "0600"
+
+# V-257958: Enable audit backlog limit at boot
+stig_audit_backlog_limit: 8192

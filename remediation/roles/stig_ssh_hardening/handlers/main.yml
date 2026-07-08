@@ -1,0 +1,13 @@
+---
+# Handlers for SSH hardening role
+# Order matters: validate BEFORE restart to prevent lockout
+
+- name: Validate sshd config
+  ansible.builtin.command:
+    cmd: sshd -t
+  changed_when: false
+
+- name: Restart sshd
+  ansible.builtin.systemd:
+    name: sshd
+    state: restarted

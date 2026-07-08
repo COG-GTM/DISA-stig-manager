@@ -1,0 +1,191 @@
+---
+# DISA RHEL 9 STIG - Filesystem Protections Remediation
+# Controls: CM-6, AC-6, SI-7, AC-3
+# Covers: V-258050 through V-258075
+
+# --- Critical file permissions ---
+
+- name: V-258055 | CAT II | CM-6 | Set /etc/passwd permissions
+  ansible.builtin.file:
+    path: /etc/passwd
+    owner: root
+    group: root
+    mode: "{{ stig_passwd_mode }}"
+  tags: [V-258055, cat2, cm-6]
+
+- name: V-258056 | CAT II | CM-6 | Set /etc/shadow permissions
+  ansible.builtin.file:
+    path: /etc/shadow
+    owner: root
+    group: root
+    mode: "{{ stig_shadow_mode }}"
+  tags: [V-258056, cat2, cm-6]
+
+- name: V-258057 | CAT II | CM-6 | Set /etc/group permissions
+  ansible.builtin.file:
+    path: /etc/group
+    owner: root
+    group: root
+    mode: "{{ stig_group_mode }}"
+  tags: [V-258057, cat2, cm-6]
+
+- name: V-258058 | CAT II | CM-6 | Set /etc/gshadow permissions
+  ansible.builtin.file:
+    path: /etc/gshadow
+    owner: root
+    group: root
+    mode: "{{ stig_gshadow_mode }}"
+  tags: [V-258058, cat2, cm-6]
+
+# --- Home directory hardening ---
+
+- name: V-258050 | CAT II | AC-6 | Get list of user home directories
+  ansible.builtin.shell:
+    cmd: |
+      awk -F: '($3 >= 1000) && ($7 != "/sbin/nologin") && ($7 != "/bin/false") {print $6}' /etc/passwd
+  register: user_home_dirs
+  changed_when: false
+  tags: [V-258050, cat2, ac-6]
+
+- name: V-258050 | CAT II | AC-6 | Set home directory permissions
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "{{ stig_home_dir_mode }}"
+  loop: "{{ user_home_dirs.stdout_lines }}"
+  when: user_home_dirs.stdout_lines | length > 0
+  failed_when: false
+  tags: [V-258050, cat2, ac-6]
+
+# --- Sticky bit on world-writable directories ---
+
+- name: V-258059 | CAT II | CM-6 | Find world-writable directories without sticky bit
+  ansible.builtin.shell:
+    cmd: |
+      find / -xdev -type d \( -perm -0002 -a ! -perm -1000 \) -print 2>/dev/null
+  register: world_writable_dirs
+  changed_when: false
+  failed_when: false
+  tags: [V-258059, cat2, cm-6]
+
+- name: V-258059 | CAT II | CM-6 | Set sticky bit on world-writable directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "o+t"
+  loop: "{{ world_writable_dirs.stdout_lines }}"
+  when: world_writable_dirs.stdout_lines | length > 0
+  tags: [V-258059, cat2, cm-6]
+
+# --- Mount options for /tmp and /var/tmp ---
+
+- name: V-258060 | CAT II | CM-6 | Check if /tmp has a dedicated partition
+  ansible.builtin.shell:
+    cmd: findmnt -n -o SOURCE /tmp 2>/dev/null || echo "none"
+  register: tmp_mount_source
+  changed_when: false
+  tags: [V-258060, cat2, cm-6]
+
+- name: V-258060 | CAT II | CM-6 | Ensure /tmp is mounted with noexec (tmpfs)
+  ansible.posix.mount:
+    path: /tmp
+    src: tmpfs
+    fstype: tmpfs
+    opts: "defaults,nodev,nosuid,noexec,size=2G"
+    state: mounted
+  when: tmp_mount_source.stdout == "none" or tmp_mount_source.stdout == "tmpfs"
+  tags: [V-258060, cat2, cm-6]
+
+- name: V-258060 | CAT II | CM-6 | Add noexec to existing /tmp partition
+  ansible.posix.mount:
+    path: /tmp
+    src: "{{ tmp_mount_source.stdout }}"
+    fstype: "{{ ansible_mounts | selectattr('mount', 'equalto', '/tmp') | map(attribute='fstype') | first | default('ext4') }}"
+    opts: "defaults,nodev,nosuid,noexec"
+    state: mounted
+  when: tmp_mount_source.stdout != "none" and tmp_mount_source.stdout != "tmpfs"
+  tags: [V-258060, cat2, cm-6]
+
+- name: V-258061 | CAT II | CM-6 | Ensure /var/tmp is bind-mounted with noexec
+  ansible.posix.mount:
+    path: /var/tmp
+    src: /tmp
+    fstype: none
+    opts: "bind,nodev,nosuid,noexec"
+    state: mounted
+  tags: [V-258061, cat2, cm-6]
+
+- name: V-258062 | CAT II | CM-6 | Ensure /dev/shm is mounted with noexec
+  ansible.posix.mount:
+    path: /dev/shm
+    src: tmpfs
+    fstype: tmpfs
+    opts: "defaults,nodev,nosuid,noexec"
+    state: mounted
+  tags: [V-258062, cat2, cm-6]
+
+# --- SUID/SGID audit ---
+
+- name: V-258054 | CAT II | CM-6 | Find unauthorized SUID binaries
+  ansible.builtin.shell:
+    cmd: |
+      find / -xdev -type f -perm -4000 2>/dev/null
+  register: suid_files
+  changed_when: false
+  tags: [V-258054, cat2, cm-6]
+
+- name: V-258054 | CAT II | CM-6 | Report unauthorized SUID files
+  ansible.builtin.debug:
+    msg: "WARNING: Unauthorized SUID binary found: {{ item }}"
+  loop: "{{ suid_files.stdout_lines | difference(stig_allowed_suid) }}"
+  when: suid_files.stdout_lines | difference(stig_allowed_suid) | length > 0
+  tags: [V-258054, cat2, cm-6]
+
+# --- File integrity (AIDE) ---
+
+- name: V-258063 | CAT II | SI-7 | Ensure AIDE is installed
+  ansible.builtin.dnf:
+    name: aide
+    state: present
+  tags: [V-258063, cat2, si-7]
+
+- name: V-258064 | CAT II | SI-7 | Initialize AIDE database if not present
+  ansible.builtin.command:
+    cmd: aide --init
+    creates: /var/lib/aide/aide.db.new.gz
+  tags: [V-258064, cat2, si-7]
+
+- name: V-258065 | CAT II | SI-7 | Copy AIDE database to active location
+  ansible.builtin.copy:
+    src: /var/lib/aide/aide.db.new.gz
+    dest: /var/lib/aide/aide.db.gz
+    remote_src: true
+    force: false
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [V-258065, cat2, si-7]
+
+- name: V-258066 | CAT II | SI-7 | Configure daily AIDE check via cron
+  ansible.builtin.cron:
+    name: "DISA STIG - Daily AIDE integrity check"
+    minute: "5"
+    hour: "4"
+    job: "/usr/sbin/aide --check | /usr/bin/logger -t aide-check"
+    user: root
+  tags: [V-258066, cat2, si-7]
+
+# --- Verification tasks ---
+
+- name: Verify | /etc/shadow permissions
+  ansible.builtin.stat:
+    path: /etc/shadow
+  register: verify_shadow
+  failed_when: verify_shadow.stat.mode != "0000"
+  tags: [verify, V-258056]
+
+- name: Verify | AIDE is installed
+  ansible.builtin.command:
+    cmd: rpm -q aide
+  register: verify_aide
+  changed_when: false
+  failed_when: verify_aide.rc != 0
+  tags: [verify, V-258063]
