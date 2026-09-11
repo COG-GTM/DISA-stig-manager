@@ -2673,6 +2673,13 @@ paths:
             type: string
             maxLength: 255
           allowReserved: true
+        - name: ticketRef
+          description: External change-record reference (e.g., a ServiceNow CHG number). When provided, stamped into the Comments column of every row of the EMASS formatted POAM
+          in: query
+          schema:
+            type: string
+            maxLength: 255
+          allowReserved: true
       responses:
         '200':
           description: CollectionFinding response

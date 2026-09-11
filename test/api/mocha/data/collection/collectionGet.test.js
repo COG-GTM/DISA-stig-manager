@@ -5,6 +5,7 @@ import reference from '../../referenceData.js'
 import {iterations} from '../../iterations.js'
 import {expectations} from './expectations.js'
 import deepEqualInAnyOrder from 'deep-equal-in-any-order'
+import JSZip from 'jszip'
 import {use, expect} from 'chai'
 use(deepEqualInAnyOrder)
 
@@ -718,6 +719,22 @@ describe('GET - Collection', function () {
               return
             }
             expect(res.status).to.eql(200)
+        })
+
+        it('Return an EMASS formatted POAM-like spreadsheet with ticketRef stamped into the Comments column',async function () {
+          const ticketRef = 'CHG0012345'
+          const res = await fetch(`${config.baseUrl}/collections/${reference.testCollection.collectionId}/poam?format=EMASS&aggregator=groupId&date=01%2F01%2F1970&office=MyOffice&status=Ongoing&ticketRef=${ticketRef}`, {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${iteration.token}` }
+          })
+            if (distinct.grant === "none"){
+              expect(res.status).to.eql(403)
+              return
+            }
+            expect(res.status).to.eql(200)
+            const zip = await JSZip.loadAsync(Buffer.from(await res.arrayBuffer()))
+            const sharedStrings = await zip.file('xl/sharedStrings.xml').async('string')
+            expect(sharedStrings).to.include(`Change Record: ${ticketRef}`)
         })
 
         it('Return an MCCAST formatted POAM-like spreadsheet aggregated by groupId',async function () {
