@@ -32,6 +32,7 @@ module.exports.mccastPoamObjectFromFindings = function (findings, defaults = {})
 }
 
 module.exports.poamObjectFromFindings = function (findings, defaults = {}) {
+    const ticketRefLines = defaults.ticketRef ? [`Change Record: ${defaults.ticketRef}`] : []
     const vuln = findings.map( finding => ({
         desc: `Title:\n${finding.rules[0].title}\n\nDescription:\n${finding.rules[0].vulnDiscussion}`,
         control: finding.ccis.map( cci => cci.apAcronym).join('\n'),
@@ -44,7 +45,7 @@ module.exports.poamObjectFromFindings = function (findings, defaults = {}) {
         stigInfo: finding.stigs.map( stig => 
             `${stig.benchmarkId}\n${stig.revisionStr}\nBenchmark Date: ${stig.benchmarkDate}` ).join('\n\n'),
         status: defaults.status,
-        comments: finding.ccis.map( cci => `CCI-${cci.cci}`).join('\n'),
+        comments: [...ticketRefLines, ...finding.ccis.map( cci => `CCI-${cci.cci}`)].join('\n'),
         rawSeverity: finding.severity === 'medium' ? 'II' : finding.severity === 'low' ? 'III' : finding.severity === 'high' ? 'I' : 'Mixed',
         assets: finding.assets.map( asset => asset.name ).join('\n'),
         mitigations: '',

@@ -186,6 +186,7 @@ module.exports.getPoamByCollection = async function getPoamByCollection (req, re
       status, 
       mccastPackageId, 
       mccastAuthName, 
+      ticketRef,
       format
     } = req.query
     const defaults = {
@@ -193,7 +194,8 @@ module.exports.getPoamByCollection = async function getPoamByCollection (req, re
       office, 
       status, 
       mccastPackageId, 
-      mccastAuthName
+      mccastAuthName,
+      ticketRef
     }
     const {collectionId, grant} = await getCollectionInfoAndCheckPermission(req, Security.ROLES.Restricted)
     const findings = await CollectionService.getFindingsByCollection({
