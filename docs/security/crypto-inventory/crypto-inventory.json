@@ -1,14 +1,14 @@
 {
   "schema_version": "1.0",
   "summary": {
-    "generated_utc": "2026-09-14T21:41:14+00:00",
-    "commit_sha": "c066205075826a893833d9c1491589309c9bac32",
+    "generated_utc": "2026-09-14T21:51:24+00:00",
+    "commit_sha": "a60a688755640584254099a89a37b16c2c221feb",
     "files_scanned": 365,
     "files_skipped": 471,
     "rules": 51,
-    "total_findings": 141,
+    "total_findings": 144,
     "by_quantum_class": {
-      "Quantum-vulnerable (Shor)": 14,
+      "Quantum-vulnerable (Shor)": 17,
       "Deprecated/weak regardless of PQC": 5,
       "Symmetric — Grover-affected, adequate at ≥256-bit": 6,
       "Protocol/configuration — inherits class of negotiated algorithms": 35,
@@ -16,7 +16,7 @@
     },
     "by_priority": {
       "1": 3,
-      "2": 10,
+      "2": 13,
       "3": 59,
       "4": 69
     },
@@ -29,7 +29,7 @@
       "Runtime": 9,
       "Secret": 53,
       "Secret reference": 9,
-      "Signing": 6,
+      "Signing": 9,
       "TLS": 32
     },
     "by_scope": {
@@ -37,12 +37,12 @@
       "CI": 29,
       "Client (browser)": 10,
       "Documentation": 16,
-      "Repository": 3,
+      "Repository": 6,
       "Test": 51
     },
     "by_agility": {
       "Configurable": 55,
-      "Hardcoded": 72,
+      "Hardcoded": 75,
       "Library-bound": 5,
       "N/A": 9
     },
@@ -67,7 +67,8 @@
       "Static text matching only. Dynamic algorithm selection (for example the algorithm list jsonwebtoken derives from the key type) is inferred from library source knowledge, not observed at runtime.",
       "Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.",
       "TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.",
-      "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory are not pattern-scanned.",
+      "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory (the canonical docs/security/crypto-inventory and any in-repository --out path) are not pattern-scanned.",
+      "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed.",
       "Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.",
       "Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).",
       "The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.",
@@ -449,7 +450,7 @@
       "protocol": "TUF root.json",
       "qclass": "Quantum-vulnerable (Shor)",
       "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
-      "assets": "CI-0056"
+      "assets": "CI-0056, CI-0057, CI-0058, CI-0059"
     },
     {
       "component": "client/src/js/workers/oidc-worker.js (Client (browser))",
@@ -458,7 +459,7 @@
       "protocol": "OAuth 2.0 authorization code + PKCE",
       "qclass": "Symmetric — Grover-affected, adequate at ≥256-bit",
       "cnsa": "SHA-384 or SHA-512 (already SHA-2; SHA-256 acceptable per CNSA 2.0 where interoperability requires)",
-      "assets": "CI-0061"
+      "assets": "CI-0064"
     },
     {
       "component": "Dockerfile (Repository)",
@@ -467,7 +468,7 @@
       "protocol": "",
       "qclass": "Protocol/configuration — inherits class of negotiated algorithms",
       "cnsa": "TLS 1.3 with ML-KEM key establishment and ML-DSA certificates when available",
-      "assets": "CI-0070"
+      "assets": "CI-0073"
     }
   ],
   "crypto_agility_gaps": [
@@ -533,6 +534,36 @@
     },
     {
       "asset_id": "CI-0056",
+      "file": "root.json",
+      "line": 1,
+      "algorithm": "ECDSA",
+      "agility": "Hardcoded",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "recommendation": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3"
+    },
+    {
+      "asset_id": "CI-0057",
+      "file": "root.json",
+      "line": 1,
+      "algorithm": "ECDSA (X.509 certificate)",
+      "agility": "Hardcoded",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "recommendation": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3"
+    },
+    {
+      "asset_id": "CI-0058",
+      "file": "root.json",
+      "line": 1,
+      "algorithm": "ECDSA",
+      "agility": "Hardcoded",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "recommendation": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3"
+    },
+    {
+      "asset_id": "CI-0059",
       "file": "root.json",
       "line": 1,
       "algorithm": "ECDSA",
@@ -712,7 +743,49 @@
       "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file."
     },
     {
-      "asset_id": "CI-0070",
+      "asset_id": "CI-0057",
+      "priority": 2,
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "algorithm": "ECDSA (X.509 certificate)",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file."
+    },
+    {
+      "asset_id": "CI-0058",
+      "priority": 2,
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "algorithm": "ECDSA",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file."
+    },
+    {
+      "asset_id": "CI-0059",
+      "priority": 2,
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "algorithm": "ECDSA",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file."
+    },
+    {
+      "asset_id": "CI-0073",
       "priority": 2,
       "file": "Dockerfile",
       "line": 15,
@@ -2199,6 +2272,81 @@
     },
     {
       "asset_id": "CI-0057",
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "category": "Signing",
+      "algorithm": "ECDSA (X.509 certificate)",
+      "key_size": "secp256r1",
+      "mode": "Certificate subject: [values withheld] attributes: commonName; self-signed (subject = issuer); valid 2021-04-06 to 2031-04-04",
+      "purpose": "Container image trust metadata (Docker Content Trust / Notary root)",
+      "library": "Notary/TUF (registry)",
+      "protocol": "TUF root.json",
+      "security_relevant": "Yes",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "agility": "Hardcoded",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "priority": 2,
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file.",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "evidence": "\"keytype\":\"ecdsa-x509\"",
+      "rule": "TRUST-TUF-KEY"
+    },
+    {
+      "asset_id": "CI-0058",
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "category": "Signing",
+      "algorithm": "ECDSA",
+      "key_size": "secp256r1",
+      "mode": "",
+      "purpose": "Container image trust metadata (Docker Content Trust / Notary root)",
+      "library": "Notary/TUF (registry)",
+      "protocol": "TUF root.json",
+      "security_relevant": "Yes",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "agility": "Hardcoded",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "priority": 2,
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file.",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "evidence": "\"keytype\":\"ecdsa\"",
+      "rule": "TRUST-TUF-KEY"
+    },
+    {
+      "asset_id": "CI-0059",
+      "file": "root.json",
+      "line": 1,
+      "scope": "Repository",
+      "category": "Signing",
+      "algorithm": "ECDSA",
+      "key_size": "secp256r1",
+      "mode": "",
+      "purpose": "Container image trust metadata (Docker Content Trust / Notary root)",
+      "library": "Notary/TUF (registry)",
+      "protocol": "TUF root.json",
+      "security_relevant": "Yes",
+      "qclass": "Quantum-vulnerable (Shor)",
+      "cnsa": "ML-DSA (FIPS 204) or LMS/XMSS (SP 800-208) for software signing",
+      "agility": "Hardcoded",
+      "ext_dep": "Container registry Notary service and consumer docker clients",
+      "priority": 2,
+      "rationale": "Image signature trust roots are ECDSA; verification keys are pinned in this file.",
+      "action": "Track registry/Notary support for PQC signatures; re-issue trust roots when available.",
+      "phase": "Phase 3",
+      "gap": "Trust root keys are static ECDSA public keys embedded in root.json.",
+      "evidence": "\"keytype\":\"ecdsa\"",
+      "rule": "TRUST-TUF-KEY"
+    },
+    {
+      "asset_id": "CI-0060",
       "file": "api/source/service/STIGService.js",
       "line": 799,
       "scope": "API (server)",
@@ -2223,7 +2371,7 @@
       "rule": "HASH-NODE"
     },
     {
-      "asset_id": "CI-0058",
+      "asset_id": "CI-0061",
       "file": "api/source/service/STIGService.js",
       "line": 802,
       "scope": "API (server)",
@@ -2248,7 +2396,7 @@
       "rule": "HASH-NODE"
     },
     {
-      "asset_id": "CI-0059",
+      "asset_id": "CI-0062",
       "file": "client/src/js/SM/Attachments.js",
       "line": 141,
       "scope": "Client (browser)",
@@ -2273,7 +2421,7 @@
       "rule": "HASH-WEBCRYPTO"
     },
     {
-      "asset_id": "CI-0060",
+      "asset_id": "CI-0063",
       "file": "client/src/js/workers/oidc-worker.js",
       "line": 157,
       "scope": "Client (browser)",
@@ -2298,7 +2446,7 @@
       "rule": "HASH-WEBCRYPTO"
     },
     {
-      "asset_id": "CI-0061",
+      "asset_id": "CI-0064",
       "file": "client/src/js/workers/oidc-worker.js",
       "line": 267,
       "scope": "Client (browser)",
@@ -2323,7 +2471,7 @@
       "rule": "OIDC-PKCE-S256"
     },
     {
-      "asset_id": "CI-0062",
+      "asset_id": "CI-0065",
       "file": "test/utils/mockOidc.js",
       "line": 37,
       "scope": "Test",
@@ -2348,7 +2496,7 @@
       "rule": "HASH-NODE"
     },
     {
-      "asset_id": "CI-0063",
+      "asset_id": "CI-0066",
       "file": ".gitignore",
       "line": 26,
       "scope": "Repository",
@@ -2373,7 +2521,7 @@
       "rule": "KEYMAT-GITIGNORE"
     },
     {
-      "asset_id": "CI-0064",
+      "asset_id": "CI-0067",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 49,
       "scope": "CI",
@@ -2398,7 +2546,7 @@
       "rule": "RUNTIME-CI-NODE"
     },
     {
-      "asset_id": "CI-0065",
+      "asset_id": "CI-0068",
       "file": ".github/workflows/api-binary-tests.yml",
       "line": 50,
       "scope": "CI",
@@ -2423,7 +2571,7 @@
       "rule": "RUNTIME-CI-NODE"
     },
     {
-      "asset_id": "CI-0066",
+      "asset_id": "CI-0069",
       "file": ".github/workflows/api-binary-tests.yml",
       "line": 94,
       "scope": "CI",
@@ -2448,7 +2596,7 @@
       "rule": "RUNTIME-CI-NODE"
     },
     {
-      "asset_id": "CI-0067",
+      "asset_id": "CI-0070",
       "file": ".github/workflows/api-container-tests.yml",
       "line": 40,
       "scope": "CI",
@@ -2473,7 +2621,7 @@
       "rule": "RUNTIME-CI-CONTAINER-ARG"
     },
     {
-      "asset_id": "CI-0068",
+      "asset_id": "CI-0071",
       "file": ".github/workflows/api-spec-validation.yml",
       "line": 25,
       "scope": "CI",
@@ -2498,7 +2646,7 @@
       "rule": "RUNTIME-CI-NODE"
     },
     {
-      "asset_id": "CI-0069",
+      "asset_id": "CI-0072",
       "file": ".github/workflows/unit-tests.yml",
       "line": 27,
       "scope": "CI",
@@ -2523,7 +2671,7 @@
       "rule": "RUNTIME-CI-NODE"
     },
     {
-      "asset_id": "CI-0070",
+      "asset_id": "CI-0073",
       "file": "Dockerfile",
       "line": 15,
       "scope": "Repository",
@@ -2548,7 +2696,7 @@
       "rule": "RUNTIME-DOCKER-BASE"
     },
     {
-      "asset_id": "CI-0071",
+      "asset_id": "CI-0074",
       "file": "api/pkg.config.json",
       "line": 14,
       "scope": "API (server)",
@@ -2573,7 +2721,7 @@
       "rule": "RUNTIME-PKG-TARGET"
     },
     {
-      "asset_id": "CI-0072",
+      "asset_id": "CI-0075",
       "file": "docs/Dockerfile",
       "line": 1,
       "scope": "Documentation",
@@ -2598,7 +2746,7 @@
       "rule": "RUNTIME-DOCKER-BASE"
     },
     {
-      "asset_id": "CI-0073",
+      "asset_id": "CI-0076",
       "file": "client/src/js/init.js",
       "line": 226,
       "scope": "Client (browser)",
@@ -2623,7 +2771,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0074",
+      "asset_id": "CI-0077",
       "file": "client/src/js/init.js",
       "line": 256,
       "scope": "Client (browser)",
@@ -2648,7 +2796,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0075",
+      "asset_id": "CI-0078",
       "file": "client/src/js/workers/oidc-worker.js",
       "line": 15,
       "scope": "Client (browser)",
@@ -2673,7 +2821,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0076",
+      "asset_id": "CI-0079",
       "file": "client/src/js/workers/oidc-worker.js",
       "line": 150,
       "scope": "Client (browser)",
@@ -2698,7 +2846,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0077",
+      "asset_id": "CI-0080",
       "file": "client/src/js/workers/state-worker.js",
       "line": 13,
       "scope": "Client (browser)",
@@ -2723,7 +2871,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0078",
+      "asset_id": "CI-0081",
       "file": "client/src/reauth.html",
       "line": 33,
       "scope": "Client (browser)",
@@ -2748,7 +2896,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0079",
+      "asset_id": "CI-0082",
       "file": "test/utils/mockOidc.js",
       "line": 159,
       "scope": "Test",
@@ -2773,7 +2921,7 @@
       "rule": "RNG-CSPRNG"
     },
     {
-      "asset_id": "CI-0080",
+      "asset_id": "CI-0083",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 26,
       "scope": "CI",
@@ -2798,7 +2946,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0081",
+      "asset_id": "CI-0084",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 71,
       "scope": "CI",
@@ -2823,7 +2971,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0082",
+      "asset_id": "CI-0085",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 74,
       "scope": "CI",
@@ -2848,7 +2996,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0083",
+      "asset_id": "CI-0086",
       "file": ".github/workflows/api-binary-tests.yml",
       "line": 32,
       "scope": "CI",
@@ -2873,7 +3021,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0084",
+      "asset_id": "CI-0087",
       "file": ".github/workflows/api-binary-tests.yml",
       "line": 107,
       "scope": "CI",
@@ -2898,7 +3046,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0085",
+      "asset_id": "CI-0088",
       "file": ".github/workflows/api-binary-tests.yml",
       "line": 110,
       "scope": "CI",
@@ -2923,7 +3071,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0086",
+      "asset_id": "CI-0089",
       "file": ".github/workflows/api-container-tests.yml",
       "line": 59,
       "scope": "CI",
@@ -2948,7 +3096,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0087",
+      "asset_id": "CI-0090",
       "file": ".github/workflows/api-container-tests.yml",
       "line": 62,
       "scope": "CI",
@@ -2973,7 +3121,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0088",
+      "asset_id": "CI-0091",
       "file": ".github/workflows/api-container-tests.yml",
       "line": 72,
       "scope": "CI",
@@ -2998,7 +3146,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0089",
+      "asset_id": "CI-0092",
       "file": "docs/the-project/DockerHub_Readme.md",
       "line": 45,
       "scope": "Documentation",
@@ -3023,7 +3171,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0090",
+      "asset_id": "CI-0093",
       "file": "docs/the-project/DockerHub_Readme.md",
       "line": 47,
       "scope": "Documentation",
@@ -3048,7 +3196,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0091",
+      "asset_id": "CI-0094",
       "file": "docs/the-project/DockerHub_Readme.md",
       "line": 59,
       "scope": "Documentation",
@@ -3073,7 +3221,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0092",
+      "asset_id": "CI-0095",
       "file": "docs/the-project/DockerHub_Readme.md",
       "line": 109,
       "scope": "Documentation",
@@ -3098,7 +3246,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0093",
+      "asset_id": "CI-0096",
       "file": "docs/the-project/DockerHub_Readme.md",
       "line": 112,
       "scope": "Documentation",
@@ -3123,7 +3271,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0094",
+      "asset_id": "CI-0097",
       "file": "test/api/README.md",
       "line": 29,
       "scope": "Test",
@@ -3148,7 +3296,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0095",
+      "asset_id": "CI-0098",
       "file": "test/api/README.md",
       "line": 32,
       "scope": "Test",
@@ -3173,7 +3321,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0096",
+      "asset_id": "CI-0099",
       "file": "test/api/mocha/cross-boundary/lvl1.test.js",
       "line": 14,
       "scope": "Test",
@@ -3198,7 +3346,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0097",
+      "asset_id": "CI-0100",
       "file": "test/api/mocha/data/acl/directAcl.test.js",
       "line": 16,
       "scope": "Test",
@@ -3223,7 +3371,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0098",
+      "asset_id": "CI-0101",
       "file": "test/api/mocha/data/acl/groupAcl.test.js",
       "line": 14,
       "scope": "Test",
@@ -3248,7 +3396,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0099",
+      "asset_id": "CI-0102",
       "file": "test/api/mocha/integration/access.test.js",
       "line": 13,
       "scope": "Test",
@@ -3273,7 +3421,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0100",
+      "asset_id": "CI-0103",
       "file": "test/api/mocha/integration/aclResolution.test.js",
       "line": 11,
       "scope": "Test",
@@ -3298,7 +3446,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0101",
+      "asset_id": "CI-0104",
       "file": "test/api/mocha/integration/asset.test.js",
       "line": 11,
       "scope": "Test",
@@ -3323,7 +3471,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0102",
+      "asset_id": "CI-0105",
       "file": "test/api/mocha/integration/collection.test.js",
       "line": 16,
       "scope": "Test",
@@ -3348,7 +3496,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0103",
+      "asset_id": "CI-0106",
       "file": "test/api/mocha/integration/collectionTaskConfig.test.js",
       "line": 11,
       "scope": "Test",
@@ -3373,7 +3521,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0104",
+      "asset_id": "CI-0107",
       "file": "test/api/mocha/integration/deleteHandling.test.js",
       "line": 11,
       "scope": "Test",
@@ -3398,7 +3546,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0105",
+      "asset_id": "CI-0108",
       "file": "test/api/mocha/integration/grantChange.test.js",
       "line": 13,
       "scope": "Test",
@@ -3423,7 +3571,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0106",
+      "asset_id": "CI-0109",
       "file": "test/api/mocha/integration/job.test.js",
       "line": 9,
       "scope": "Test",
@@ -3448,7 +3596,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0107",
+      "asset_id": "CI-0110",
       "file": "test/api/mocha/integration/metrics.test.js",
       "line": 17,
       "scope": "Test",
@@ -3473,7 +3621,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0108",
+      "asset_id": "CI-0111",
       "file": "test/api/mocha/integration/review.test.js",
       "line": 15,
       "scope": "Test",
@@ -3498,7 +3646,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0109",
+      "asset_id": "CI-0112",
       "file": "test/api/mocha/integration/roleResolution.test.js",
       "line": 12,
       "scope": "Test",
@@ -3523,7 +3671,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0110",
+      "asset_id": "CI-0113",
       "file": "test/api/mocha/integration/stig.test.js",
       "line": 15,
       "scope": "Test",
@@ -3548,7 +3696,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0111",
+      "asset_id": "CI-0114",
       "file": "test/api/mocha/integration/userStatus.test.js",
       "line": 11,
       "scope": "Test",
@@ -3573,7 +3721,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0112",
+      "asset_id": "CI-0115",
       "file": "test/api/mocha/iterations.js",
       "line": 8,
       "scope": "Test",
@@ -3598,7 +3746,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0113",
+      "asset_id": "CI-0116",
       "file": "test/api/mocha/security/reviewCrossCollectionWrite.test.js",
       "line": 71,
       "scope": "Test",
@@ -3623,7 +3771,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0114",
+      "asset_id": "CI-0117",
       "file": "test/api/mocha/testConfig.js",
       "line": 3,
       "scope": "Test",
@@ -3648,7 +3796,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0115",
+      "asset_id": "CI-0118",
       "file": "test/api/runMocha.sh",
       "line": 112,
       "scope": "Test",
@@ -3673,84 +3821,9 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0116",
-      "file": "test/state/mocha/bootstrap.test.js",
-      "line": 108,
-      "scope": "Test",
-      "category": "Secret",
-      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
-      "key_size": "",
-      "mode": "",
-      "purpose": "Credential literal (type: database password)",
-      "library": "",
-      "protocol": "",
-      "security_relevant": "Yes",
-      "qclass": "Not applicable (no quantum-relevant primitive)",
-      "cnsa": "None required",
-      "agility": "Hardcoded",
-      "ext_dep": "",
-      "priority": 3,
-      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
-      "action": "",
-      "phase": "",
-      "gap": "",
-      "evidence": "[redacted] database password literal",
-      "rule": "SECRET-DB-PASSWORD-LITERAL"
-    },
-    {
-      "asset_id": "CI-0117",
-      "file": "test/state/mocha/bootstrap.test.js",
-      "line": 186,
-      "scope": "Test",
-      "category": "Secret",
-      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
-      "key_size": "",
-      "mode": "",
-      "purpose": "Credential literal (type: database password)",
-      "library": "",
-      "protocol": "",
-      "security_relevant": "Yes",
-      "qclass": "Not applicable (no quantum-relevant primitive)",
-      "cnsa": "None required",
-      "agility": "Hardcoded",
-      "ext_dep": "",
-      "priority": 3,
-      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
-      "action": "",
-      "phase": "",
-      "gap": "",
-      "evidence": "[redacted] database password literal",
-      "rule": "SECRET-DB-PASSWORD-LITERAL"
-    },
-    {
-      "asset_id": "CI-0118",
-      "file": "test/state/mocha/bootstrap.test.js",
-      "line": 246,
-      "scope": "Test",
-      "category": "Secret",
-      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
-      "key_size": "",
-      "mode": "",
-      "purpose": "Credential literal (type: database password)",
-      "library": "",
-      "protocol": "",
-      "security_relevant": "Yes",
-      "qclass": "Not applicable (no quantum-relevant primitive)",
-      "cnsa": "None required",
-      "agility": "Hardcoded",
-      "ext_dep": "",
-      "priority": 3,
-      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
-      "action": "",
-      "phase": "",
-      "gap": "",
-      "evidence": "[redacted] database password literal",
-      "rule": "SECRET-DB-PASSWORD-LITERAL"
-    },
-    {
       "asset_id": "CI-0119",
       "file": "test/state/mocha/bootstrap.test.js",
-      "line": 310,
+      "line": 108,
       "scope": "Test",
       "category": "Secret",
       "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
@@ -3775,7 +3848,7 @@
     {
       "asset_id": "CI-0120",
       "file": "test/state/mocha/bootstrap.test.js",
-      "line": 383,
+      "line": 186,
       "scope": "Test",
       "category": "Secret",
       "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
@@ -3800,7 +3873,7 @@
     {
       "asset_id": "CI-0121",
       "file": "test/state/mocha/bootstrap.test.js",
-      "line": 407,
+      "line": 246,
       "scope": "Test",
       "category": "Secret",
       "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
@@ -3825,7 +3898,7 @@
     {
       "asset_id": "CI-0122",
       "file": "test/state/mocha/bootstrap.test.js",
-      "line": 431,
+      "line": 310,
       "scope": "Test",
       "category": "Secret",
       "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
@@ -3849,6 +3922,81 @@
     },
     {
       "asset_id": "CI-0123",
+      "file": "test/state/mocha/bootstrap.test.js",
+      "line": 383,
+      "scope": "Test",
+      "category": "Secret",
+      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
+      "key_size": "",
+      "mode": "",
+      "purpose": "Credential literal (type: database password)",
+      "library": "",
+      "protocol": "",
+      "security_relevant": "Yes",
+      "qclass": "Not applicable (no quantum-relevant primitive)",
+      "cnsa": "None required",
+      "agility": "Hardcoded",
+      "ext_dep": "",
+      "priority": 3,
+      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
+      "action": "",
+      "phase": "",
+      "gap": "",
+      "evidence": "[redacted] database password literal",
+      "rule": "SECRET-DB-PASSWORD-LITERAL"
+    },
+    {
+      "asset_id": "CI-0124",
+      "file": "test/state/mocha/bootstrap.test.js",
+      "line": 407,
+      "scope": "Test",
+      "category": "Secret",
+      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
+      "key_size": "",
+      "mode": "",
+      "purpose": "Credential literal (type: database password)",
+      "library": "",
+      "protocol": "",
+      "security_relevant": "Yes",
+      "qclass": "Not applicable (no quantum-relevant primitive)",
+      "cnsa": "None required",
+      "agility": "Hardcoded",
+      "ext_dep": "",
+      "priority": 3,
+      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
+      "action": "",
+      "phase": "",
+      "gap": "",
+      "evidence": "[redacted] database password literal",
+      "rule": "SECRET-DB-PASSWORD-LITERAL"
+    },
+    {
+      "asset_id": "CI-0125",
+      "file": "test/state/mocha/bootstrap.test.js",
+      "line": 431,
+      "scope": "Test",
+      "category": "Secret",
+      "algorithm": "Database password literal (STIGMAN_DB_PASSWORD)",
+      "key_size": "",
+      "mode": "",
+      "purpose": "Credential literal (type: database password)",
+      "library": "",
+      "protocol": "",
+      "security_relevant": "Yes",
+      "qclass": "Not applicable (no quantum-relevant primitive)",
+      "cnsa": "None required",
+      "agility": "Hardcoded",
+      "ext_dep": "",
+      "priority": 3,
+      "rationale": "Literal credential in test/CI configuration; must not be reused in production.",
+      "action": "",
+      "phase": "",
+      "gap": "",
+      "evidence": "[redacted] database password literal",
+      "rule": "SECRET-DB-PASSWORD-LITERAL"
+    },
+    {
+      "asset_id": "CI-0126",
       "file": "test/state/mocha/db.test.js",
       "line": 30,
       "scope": "Test",
@@ -3873,7 +4021,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0124",
+      "asset_id": "CI-0127",
       "file": "test/state/mocha/db.test.js",
       "line": 127,
       "scope": "Test",
@@ -3898,7 +4046,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0125",
+      "asset_id": "CI-0128",
       "file": "test/state/mocha/jwks.test.js",
       "line": 37,
       "scope": "Test",
@@ -3923,7 +4071,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0126",
+      "asset_id": "CI-0129",
       "file": "test/state/mocha/lib.js",
       "line": 236,
       "scope": "Test",
@@ -3948,7 +4096,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0127",
+      "asset_id": "CI-0130",
       "file": "test/state/mocha/lib.js",
       "line": 239,
       "scope": "Test",
@@ -3973,7 +4121,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0128",
+      "asset_id": "CI-0131",
       "file": "test/state/mocha/oidc.test.js",
       "line": 30,
       "scope": "Test",
@@ -3998,7 +4146,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0129",
+      "asset_id": "CI-0132",
       "file": "test/state/mocha/tokenValidation.test.js",
       "line": 32,
       "scope": "Test",
@@ -4023,7 +4171,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0130",
+      "asset_id": "CI-0133",
       "file": "test/state/mocha/tokenValidation.test.js",
       "line": 132,
       "scope": "Test",
@@ -4048,7 +4196,7 @@
       "rule": "SECRET-DB-PASSWORD-LITERAL"
     },
     {
-      "asset_id": "CI-0131",
+      "asset_id": "CI-0134",
       "file": "test/utils/appdata-update.js",
       "line": 7,
       "scope": "Test",
@@ -4073,7 +4221,7 @@
       "rule": "SECRET-JWT-LITERAL"
     },
     {
-      "asset_id": "CI-0132",
+      "asset_id": "CI-0135",
       "file": "test/utils/mockOidc.js",
       "line": 53,
       "scope": "Test",
@@ -4098,7 +4246,7 @@
       "rule": "SECRET-JWK-PRIVATE"
     },
     {
-      "asset_id": "CI-0133",
+      "asset_id": "CI-0136",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 171,
       "scope": "CI",
@@ -4123,7 +4271,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0134",
+      "asset_id": "CI-0137",
       "file": ".github/workflows/api-audit-test-coverage-response.yml",
       "line": 172,
       "scope": "CI",
@@ -4148,7 +4296,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0135",
+      "asset_id": "CI-0138",
       "file": ".github/workflows/build-binary-artifacts.yml",
       "line": 49,
       "scope": "CI",
@@ -4173,7 +4321,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0136",
+      "asset_id": "CI-0139",
       "file": ".github/workflows/client-sonarcloud.yml",
       "line": 48,
       "scope": "CI",
@@ -4198,7 +4346,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0137",
+      "asset_id": "CI-0140",
       "file": ".github/workflows/client-sonarcloud.yml",
       "line": 49,
       "scope": "CI",
@@ -4223,7 +4371,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0138",
+      "asset_id": "CI-0141",
       "file": ".github/workflows/pub-docker.yml",
       "line": 77,
       "scope": "CI",
@@ -4248,7 +4396,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0139",
+      "asset_id": "CI-0142",
       "file": ".github/workflows/pub-docker.yml",
       "line": 78,
       "scope": "CI",
@@ -4273,7 +4421,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0140",
+      "asset_id": "CI-0143",
       "file": ".github/workflows/pub-docker.yml",
       "line": 108,
       "scope": "CI",
@@ -4298,7 +4446,7 @@
       "rule": "SECRET-CI-REFERENCE"
     },
     {
-      "asset_id": "CI-0141",
+      "asset_id": "CI-0144",
       "file": ".github/workflows/pub-docker.yml",
       "line": 109,
       "scope": "CI",

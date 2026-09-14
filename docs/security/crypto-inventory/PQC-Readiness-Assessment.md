@@ -2,8 +2,8 @@
 
 **System:** STIG Manager (API, browser client, database schema, deployment assets in this repository)
 **Deliverable:** CDRL A009 — Cryptographic Inventory and PQC Readiness Assessment
-**Commit scanned:** `c066205075826a893833d9c1491589309c9bac32`
-**Generated:** 2026-09-14T21:41:14+00:00 by `scripts/crypto_inventory.py`
+**Commit scanned:** `a60a688755640584254099a89a37b16c2c221feb`
+**Generated:** 2026-09-14T21:51:24+00:00 by `scripts/crypto_inventory.py`
 **Companion files:** `Cryptographic-Inventory.xlsx`, `crypto-inventory.json` (same directory)
 
 > NO production cryptographic service is introduced, replaced, disabled, or reconfigured by this work — recommendations only, pending Government authorization.
@@ -14,11 +14,11 @@ All counts and tables in this report are generated from `crypto-inventory.json` 
 
 STIG Manager is a web application that stores STIG evaluation results and POA&M-related data. It does not implement its own encryption of stored data. Its cryptography is concentrated in three places: (1) verification of OIDC access tokens signed by an external identity provider (IdP), (2) TLS for the API listener, the MySQL connection and the IdP connection, and (3) release signing in CI. Everything else is SHA-256 hashing for identifiers and content digests, and CSPRNG use in the browser.
 
-The scanner produced **141 inventory rows** from **365 files** using **51 detection rules**.
+The scanner produced **144 inventory rows** from **365 files** using **51 detection rules**.
 
 | Quantum-vulnerability class | Rows |
 |---|---|
-| Quantum-vulnerable (Shor) | 14 |
+| Quantum-vulnerable (Shor) | 17 |
 | Deprecated/weak regardless of PQC | 5 |
 | Symmetric — Grover-affected, adequate at ≥256-bit | 6 |
 | Protocol/configuration — inherits class of negotiated algorithms | 35 |
@@ -28,7 +28,7 @@ Key conclusions:
 
 - **Quantum exposure is dominated by signature forgery, not by harvest-now-decrypt-later (HNDL).** The system's only long-lived public-key trust relationships are the IdP's JWS signing key (RSA or ECDSA today) and the release-signing keys (OpenPGP in CI; ECDSA in `root.json`). A cryptographically relevant quantum computer (CRQC) would allow an attacker to forge access tokens or release signatures. It would not retroactively expose stored data, because the application stores nothing encrypted and its data has limited confidentiality life.
 - **HNDL exposure exists only at the TLS layer** and only for traffic recorded today: API sessions (bearer tokens, STIG results), MySQL traffic, and IdP traffic. Bearer tokens are short-lived. STIG results are sensitive but are not secret keys; their confidentiality value decays as systems are re-scanned. This is a real but bounded exposure. It is addressed by hybrid key establishment in TLS (Phase 2), which is a deployment-layer change.
-- **8 Shor-vulnerable rows are outside test code**, all of them in the JWT verification path, CI release signing and the `root.json` trust metadata. 6 further rows are test fixtures.
+- **11 Shor-vulnerable rows are outside test code**, all of them in the JWT verification path, CI release signing and the `root.json` trust metadata. 6 further rows are test fixtures.
 - **5 rows are weak regardless of PQC**: RSA-1024 keys and certificates. All are in test fixtures (`test/utils/mockOidc.js`, `test/api/mock-keycloak*`). None are in the deployed system. They should still be replaced because Node.js 24 with OpenSSL 3.5 at security level 2 rejects RSA keys under 2048 bits in TLS, and because they are a poor model of production.
 - **The application never selects a signature or key-exchange algorithm itself.** Accepted JWS algorithms follow the key type published by the IdP (`jsonwebtoken` 9.x behavior) and the JWK key-type allowlist `RSA`/`EC`/`OKP` in `api/source/utils/jwksCache.js`. TLS versions and cipher suites are Node.js/OpenSSL defaults; the repository sets none. This makes the system **crypto-agile at the protocol layer but library-bound for signatures**: PQC signatures require (a) the IdP to issue ML-DSA-signed tokens, (b) a JWT library that accepts them, and (c) a one-line change to the JWK key-type filter. None of these exist in released form today.
 - **The runtime is a mutable tag.** `Dockerfile` uses `node:lts-alpine` and CI uses `lts/*`. As of the generation date the LTS line is Node.js 24, which ships OpenSSL 3.5 (ML-KEM, ML-DSA and SLH-DSA are implemented in the library). On 2026-10-28 the `lts` tag is scheduled to move to Node.js 26. The Government should decide whether to pin a concrete version before any PQC evaluation, so results are reproducible.
@@ -59,7 +59,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `c066205075826a893833d9c1491589309c9bac32` except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing.
+Scanned: every text file under the repository at commit `a60a688755640584254099a89a37b16c2c221feb` except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing.
 
 Not scanned or out of scope:
 
@@ -97,7 +97,8 @@ Priority scale: **1** act in Phase 1 or blocks later phases; **2** Phase 1/2 con
 - Static text matching only. Dynamic algorithm selection (for example the algorithm list jsonwebtoken derives from the key type) is inferred from library source knowledge, not observed at runtime.
 - Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.
 - TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.
-- Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory are not pattern-scanned.
+- Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory (the canonical docs/security/crypto-inventory and any in-repository --out path) are not pattern-scanned.
+- Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed.
 - Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.
 - Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).
 - The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.
@@ -112,7 +113,7 @@ Counts below are generated from the scanner output.
 | Migration priority | Rows |
 |---|---|
 | 1 | 3 |
-| 2 | 10 |
+| 2 | 13 |
 | 3 | 59 |
 | 4 | 69 |
 
@@ -128,7 +129,7 @@ Counts below are generated from the scanner output.
 | Runtime | 9 |
 | Secret | 53 |
 | Secret reference | 9 |
-| Signing | 6 |
+| Signing | 9 |
 | TLS | 32 |
 
 **By scope**
@@ -139,7 +140,7 @@ Counts below are generated from the scanner output.
 | CI | 29 |
 | Client (browser) | 10 |
 | Documentation | 16 |
-| Repository | 3 |
+| Repository | 6 |
 | Test | 51 |
 
 **By crypto-agility rating**
@@ -147,7 +148,7 @@ Counts below are generated from the scanner output.
 | Crypto-agility rating | Rows |
 |---|---|
 | Configurable | 55 |
-| Hardcoded | 72 |
+| Hardcoded | 75 |
 | Library-bound | 5 |
 | N/A | 9 |
 
@@ -185,7 +186,10 @@ Class abbreviations used in the tables below: Shor = Quantum-vulnerable (Shor); 
 | CI-0054 | .github/workflows/build-binary-artifacts.yml:78 | OpenPGP signature verification |  | Configurable | 3 |
 | CI-0055 | .github/workflows/build-binary-artifacts.yml:82 | OpenPGP signature verification |  | Configurable | 3 |
 | CI-0056 | root.json:1 | ECDSA | secp256r1 | Hardcoded | 2 |
-| CI-0132 | test/utils/mockOidc.js:53 | Private key (JWK private exponent) |  | Hardcoded | 3 |
+| CI-0057 | root.json:1 | ECDSA (X.509 certificate) | secp256r1 | Hardcoded | 2 |
+| CI-0058 | root.json:1 | ECDSA | secp256r1 | Hardcoded | 2 |
+| CI-0059 | root.json:1 | ECDSA | secp256r1 | Hardcoded | 2 |
+| CI-0135 | test/utils/mockOidc.js:53 | Private key (JWK private exponent) |  | Hardcoded | 3 |
 
 ### 4.3 Deprecated or weak regardless of PQC
 
@@ -203,12 +207,12 @@ SHA-256 is the only symmetric-class primitive found. It is used for PKCE, conten
 
 | Asset | Location | Algorithm | Purpose | Security-relevant |
 |---|---|---|---|---|
-| CI-0057 | api/source/service/STIGService.js:799 | SHA-256 | Content digest used to detect duplicate STIG check/fix text | No (deduplication) |
-| CI-0058 | api/source/service/STIGService.js:802 | SHA-256 | Content digest used to detect duplicate STIG check/fix text | No (deduplication) |
-| CI-0059 | client/src/js/SM/Attachments.js:141 | SHA-256 | Digest of uploaded attachment stored as metadata (client-computed, not verified server-side) | No (metadata / identification) |
-| CI-0060 | client/src/js/workers/oidc-worker.js:157 | SHA-256 | PKCE code challenge (S256) for the OIDC authorization code flow | Yes |
-| CI-0061 | client/src/js/workers/oidc-worker.js:267 | SHA-256 (PKCE S256) | Bind the OAuth authorization code to the browser client | Yes |
-| CI-0062 | test/utils/mockOidc.js:37 | SHA-256 | Derive a JWK key identifier (kid) from the DER public key | No (identifier) |
+| CI-0060 | api/source/service/STIGService.js:799 | SHA-256 | Content digest used to detect duplicate STIG check/fix text | No (deduplication) |
+| CI-0061 | api/source/service/STIGService.js:802 | SHA-256 | Content digest used to detect duplicate STIG check/fix text | No (deduplication) |
+| CI-0062 | client/src/js/SM/Attachments.js:141 | SHA-256 | Digest of uploaded attachment stored as metadata (client-computed, not verified server-side) | No (metadata / identification) |
+| CI-0063 | client/src/js/workers/oidc-worker.js:157 | SHA-256 | PKCE code challenge (S256) for the OIDC authorization code flow | Yes |
+| CI-0064 | client/src/js/workers/oidc-worker.js:267 | SHA-256 (PKCE S256) | Bind the OAuth authorization code to the browser client | Yes |
+| CI-0065 | test/utils/mockOidc.js:37 | SHA-256 | Derive a JWK key identifier (kid) from the DER public key | No (identifier) |
 
 ### 4.5 Libraries
 
@@ -348,6 +352,9 @@ Gaps generated from the inventory:
 | CI-0028 | api/source/bootstrap/server.js:45 | TLS server (native HTTPS) | Library-bound | TLS protocol versions and cipher suites are not exposed as configuration; only key/cert/passphrase file paths are. |
 | CI-0030 | api/source/service/utils.js:198 | TLS client (MySQL) | Library-bound | MySQL TLS version and cipher policy are not configurable from the application; verification behavior relies on library defaults. |
 | CI-0056 | root.json:1 | ECDSA | Hardcoded | Trust root keys are static ECDSA public keys embedded in root.json. |
+| CI-0057 | root.json:1 | ECDSA (X.509 certificate) | Hardcoded | Trust root keys are static ECDSA public keys embedded in root.json. |
+| CI-0058 | root.json:1 | ECDSA | Hardcoded | Trust root keys are static ECDSA public keys embedded in root.json. |
+| CI-0059 | root.json:1 | ECDSA | Hardcoded | Trust root keys are static ECDSA public keys embedded in root.json. |
 
 ## 7. Interoperability and dependency constraints
 
@@ -373,9 +380,9 @@ Gaps generated from the inventory:
 | CI-0041 | docs/installation-and-setup/db.rst | MySQL server | MySQL server TLS enforcement (documentation) | Protocol |
 | CI-0051 | .github/workflows/build-binary-artifacts.yml | CI secret store | OpenPGP private key import | Shor |
 | CI-0052, CI-0053 | .github/workflows/build-binary-artifacts.yml | CI secret STIGMAN_PRIVATE_KEY; consumers' GnuPG versions | OpenPGP detached signature (key algorithm not visible in repository) | Shor |
-| CI-0056 | root.json | Container registry Notary service and consumer docker clients | ECDSA | Shor |
-| CI-0061 | client/src/js/workers/oidc-worker.js | Identity provider must support PKCE S256 | SHA-256 (PKCE S256) | Grover |
-| CI-0070 | Dockerfile | Upstream Node.js image publisher (mutable tag) | Node.js/OpenSSL runtime (container base image) | Protocol |
+| CI-0056, CI-0057, CI-0058, CI-0059 | root.json | Container registry Notary service and consumer docker clients | ECDSA | Shor |
+| CI-0064 | client/src/js/workers/oidc-worker.js | Identity provider must support PKCE S256 | SHA-256 (PKCE S256) | Grover |
+| CI-0073 | Dockerfile | Upstream Node.js image publisher (mutable tag) | Node.js/OpenSSL runtime (container base image) | Protocol |
 
 ### 7.1 Identity provider
 

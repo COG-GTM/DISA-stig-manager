@@ -162,7 +162,8 @@ METHOD_LIMITS = [
     "Static text matching only. Dynamic algorithm selection (for example the algorithm list jsonwebtoken derives from the key type) is inferred from library source knowledge, not observed at runtime.",
     "Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.",
     "TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.",
-    "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory are not pattern-scanned.",
+    "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory (the canonical docs/security/crypto-inventory and any in-repository --out path) are not pattern-scanned.",
+    "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed.",
     "Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.",
     "Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).",
     "The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.",
@@ -708,7 +709,9 @@ rule(
 
 def _refine_tuf_key(f, lines, idx, m):
     f["algorithm"] = "ECDSA" + (" (X.509 certificate)" if "x509" in m.group(1) else "")
-    ctx = _window(lines, idx, 0, 4)
+    # Search from the match position so that several keys on one (minified) line
+    # each pick up their own "public" value.
+    ctx = m.string[m.end():] + "\n" + "\n".join(lines[idx + 1:idx + 5])
     pm = re.search(r"\"public\":\s*\"([A-Za-z0-9+/=]+)\"", ctx)
     if pm:
         info = parse_public_key_b64(pm.group(1), "x509" in m.group(1))
@@ -1019,11 +1022,12 @@ def scope_for(rel: str) -> str:
     return "Repository"
 
 
-def iter_files(repo: Path):
+def iter_files(repo: Path, extra_exclude_dirs: set[str] = frozenset()):
+    exclude_paths = EXCLUDE_DIR_PATHS | set(extra_exclude_dirs)
     for root, dirs, files in os.walk(repo):
         rel_root = Path(root).relative_to(repo).as_posix()
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIR_NAMES
-                         and (d if rel_root == "." else f"{rel_root}/{d}") not in EXCLUDE_DIR_PATHS)
+                         and (d if rel_root == "." else f"{rel_root}/{d}") not in exclude_paths)
         for name in sorted(files):
             p = Path(root) / name
             rel = p.relative_to(repo).as_posix()
@@ -1055,10 +1059,15 @@ def read_text(p: Path):
 
 
 class Scanner:
-    def __init__(self, repo: Path, lts_resolves_to: str | None, probe_node: bool):
+    def __init__(self, repo: Path, lts_resolves_to: str | None, probe_node: bool, out_dir: Path | None = None):
         self.repo = repo
         self.lts_resolves_to = lts_resolves_to
         self.probe_node = probe_node
+        self.extra_exclude_dirs: set[str] = set()
+        if out_dir is not None and out_dir.resolve().is_relative_to(repo):
+            rel_out = out_dir.resolve().relative_to(repo).as_posix()
+            if rel_out != ".":
+                self.extra_exclude_dirs.add(rel_out)
         self.findings: list[dict] = []
         self.certificates: list[dict] = []
         self.libraries: list[dict] = []
@@ -1070,14 +1079,17 @@ class Scanner:
 
     # -- main ---------------------------------------------------------------
     def run(self):
-        for p, rel in iter_files(self.repo):
+        for p, rel in iter_files(self.repo, self.extra_exclude_dirs):
             if p.name in LOCKFILE_NAMES:
                 self.lockfiles.append(rel)
                 continue
             if p.name == "package.json":
                 self.manifests.append(rel)
             if p.suffix.lower() in CERT_EXTENSIONS:
-                self.inspect_cert_file(p, rel)
+                pem_text = self.inspect_cert_file(p, rel)
+                if pem_text is not None:
+                    self.files_scanned += 1
+                    self.scan_lines(rel, pem_text.split("\n"))
                 continue
             if not is_text_candidate(p, rel):
                 self.files_skipped += 1
@@ -1103,21 +1115,20 @@ class Scanner:
             if "file_re" in r and not r["file_re"].search(rel):
                 continue
             for idx, line in enumerate(lines):
-                m = r["regex"].search(line)
-                if not m:
-                    continue
                 if "not_file_re" in r and r["not_file_re"].search(line):
                     continue
-                f = self.new_finding(r, rel, idx + 1, m, scope)
-                if r.get("refine") and r["refine"](f, lines, idx, m) is False:
-                    continue
-                if r.get("collapse_per_file"):
-                    key = f"{r['id']}|{f['purpose']}"
-                    if key in seen_collapse:
-                        seen_collapse[key]["_count"] += 1
+                # finditer: minified JSON/YAML can hold several assets on one line.
+                for m in r["regex"].finditer(line):
+                    f = self.new_finding(r, rel, idx + 1, m, scope)
+                    if r.get("refine") and r["refine"](f, lines, idx, m) is False:
                         continue
-                    seen_collapse[key] = f
-                self.findings.append(f)
+                    if r.get("collapse_per_file"):
+                        key = f"{r['id']}|{f['purpose']}"
+                        if key in seen_collapse:
+                            seen_collapse[key]["_count"] += 1
+                            continue
+                        seen_collapse[key] = f
+                    self.findings.append(f)
         for f in seen_collapse.values():
             if f["_count"] > 1:
                 f["rationale"] += f" {f['_count']} occurrences in this file; first occurrence listed."
@@ -1193,22 +1204,27 @@ class Scanner:
                 self.certificates.append(info)
 
     # -- certificate files --------------------------------------------------
-    def inspect_cert_file(self, p: Path, rel: str):
+    def inspect_cert_file(self, p: Path, rel: str) -> str | None:
+        """Record certificate/key metadata. Returns the PEM text when the file is
+        text so the caller can also run the pattern rules (KEYMAT-*) over it;
+        returns None for binary files."""
         data = p.read_bytes()
         entry = {"file": rel, "line": 1, "source": f"file ({p.suffix})", "scope": scope_for(rel)}
         if p.suffix.lower() in (".p12", ".pfx", ".jks"):
             entry.update({"parser": "none", "error": "binary keystore; not parsed (password required)"})
             self.certificates.append(entry)
-            return
+            return None
         text = data.decode("utf-8", errors="replace")
-        blocks = re.findall(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", text, re.S)
+        blocks = [(m.group(1), m.group(2), text.count("\n", 0, m.start()) + 1)
+                  for m in re.finditer(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", text, re.S)]
         if not blocks:
             info = parse_certificate_der(data)
             entry.update(info)
             self.certificates.append(entry)
-            return
-        for kind, body in blocks:
+            return None
+        for kind, body, line in blocks:
             e = dict(entry)
+            e["line"] = line
             e["source"] = f"PEM {kind}"
             if kind == "CERTIFICATE":
                 e.update(parse_certificate_der(base64.b64decode(re.sub(r"\s+", "", body))))
@@ -1217,6 +1233,7 @@ class Scanner:
             else:
                 e.update({"parser": "none", "error": f"{kind} block not parsed"})
             self.certificates.append(e)
+        return text
 
     # -- libraries ----------------------------------------------------------
     def collect_libraries(self):
@@ -1438,7 +1455,7 @@ def build_document(scanner: Scanner, repo: Path) -> dict:
         ("schema_version", "1.0"),
         ("summary", scanner.summary(commit, generated)),
         ("method", {"checks": METHOD_CHECKS, "limits": METHOD_LIMITS,
-                    "excluded_dirs": sorted(EXCLUDE_DIR_NAMES | EXCLUDE_DIR_PATHS),
+                    "excluded_dirs": sorted(EXCLUDE_DIR_NAMES | EXCLUDE_DIR_PATHS | scanner.extra_exclude_dirs),
                     "parsers": {"cryptography": HAVE_CRYPTOGRAPHY, "openssl_cli": HAVE_OPENSSL_CLI}}),
         ("runtime", scanner.runtime),
         ("libraries", scanner.libraries),
@@ -1719,7 +1736,7 @@ def main(argv=None):
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
-    scanner = Scanner(repo, args.lts_resolves_to, probe_node=not args.no_probe)
+    scanner = Scanner(repo, args.lts_resolves_to, probe_node=not args.no_probe, out_dir=out)
     scanner.run()
     doc = build_document(scanner, repo)
 
