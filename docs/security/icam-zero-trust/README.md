@@ -30,7 +30,7 @@ The script validates the data (unique gap IDs, allowed pillar/risk/effort/phase 
 python3 docs/security/icam-zero-trust/scripts/icam_gap_register.py --check
 ```
 
-`--check` regenerates the workbook and then fails (exit 1) if `ICAM-ZT-Gap-Assessment.md` references a gap ID that is not in the data, omits a gap ID that is, omits any crosswalk control ID, or does not contain the derived total string `N gaps (H High, M Medium, L Low)`. Run it after editing either file. Gap counts in the Markdown executive summary must match the data; do not type counts that the data does not produce.
+`--check` regenerates the workbook and then fails (exit 1) if `ICAM-ZT-Gap-Assessment.md` drifts from the data in any of these ways: it references a gap ID that is not in the data or omits one that is; it does not contain the derived total string `N gaps (H High, M Medium, L Low)`; a row of the NIST crosswalk table (section 5) is missing, has a different status, or lists different gap IDs than `CROSSWALK`; a pillar row header in section 4 lists different gap IDs than the gaps assigned to that pillar; or a roadmap phase bullet in section 10 lists different gap IDs than the gaps sequenced into that phase. Run it after editing either file. Gap counts in the Markdown executive summary must match the data; do not type counts that the data does not produce.
 
 ## Regenerating the diagrams
 
@@ -39,7 +39,7 @@ Requires the Mermaid CLI (`npx @mermaid-js/mermaid-cli`).
 ```sh
 cd docs/security/icam-zero-trust/diagrams
 for f in as-is-architecture target-state-architecture auth-sequence; do
-  npx -y @mermaid-js/mermaid-cli -i "$f.mmd" -o "$f.png" -b white -s 2
+  npx -y @mermaid-js/mermaid-cli -i "$f.mmd" -o "$f.png" -b white -s 4
 done
 ```
 

@@ -56,4 +56,4 @@ sequenceDiagram
   end
 
   U->>W: logout
-  W->>IdP: redirect to end_session_endpoint (oidc-worker.js:115-118), tokens cleared in worker
+  W->>IdP: redirect to end_session_endpoint (oidc-worker.js:114-119), worker token state not cleared (G-15)

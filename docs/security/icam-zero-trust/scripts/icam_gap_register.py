@@ -220,14 +220,72 @@ def check_markdown(counts):
     expected = f"{len(data.GAPS)} gaps ({counts.get('H', 0)} High, {counts.get('M', 0)} Medium, {counts.get('L', 0)} Low)"
     if expected not in text:
         problems.append(f"markdown does not contain the derived count string: {expected!r}")
-    for row in data.CROSSWALK:
-        if row[0] not in text:
-            problems.append(f"markdown omits crosswalk control {row[0]}")
+    problems += check_crosswalk_rows(text)
+    problems += check_pillar_rows(text)
+    problems += check_roadmap_rows(text)
     if problems:
         for p in problems:
             print("CHECK FAILED:", p)
         raise SystemExit(1)
-    print(f"--check passed: {len(data_ids)} gap ids and count string synchronised with {MD_PATH.name}")
+    print(
+        f"--check passed: {len(data_ids)} gap ids, count string, {len(data.CROSSWALK)} crosswalk rows, "
+        f"{len(data.PILLARS)} pillar rows and {len(data.ROADMAP)} roadmap phases synchronised with {MD_PATH.name}"
+    )
+
+
+def gap_ref_set(text):
+    return set(re.findall(r"\bG-\d{2}\b", text))
+
+
+def check_crosswalk_rows(text):
+    """Each NIST control row in the Markdown table must carry the data file's status and gap references."""
+    problems = []
+    md_rows = {}
+    for m in re.finditer(r"^\| ((?:IA|AC|AU|SC)-[\d()]+) \| ([^|]+) \| ([^|]*) \| ([^|]*) \|$", text, re.M):
+        md_rows[m.group(1)] = (m.group(2).strip(), gap_ref_set(m.group(4)))
+    for control, _title, status, _evidence, gaps in data.CROSSWALK:
+        if control not in md_rows:
+            problems.append(f"markdown crosswalk table omits control {control}")
+            continue
+        md_status, md_gaps = md_rows[control]
+        if md_status != status:
+            problems.append(f"crosswalk {control}: markdown status {md_status!r} != data {status!r}")
+        if md_gaps != gap_ref_set(gaps):
+            problems.append(f"crosswalk {control}: markdown gaps {sorted(md_gaps)} != data {sorted(gap_ref_set(gaps))}")
+    extra = set(md_rows) - {row[0] for row in data.CROSSWALK}
+    if extra:
+        problems.append(f"markdown crosswalk table has controls absent from data: {sorted(extra)}")
+    return problems
+
+
+def check_pillar_rows(text):
+    """The gap list in each pillar row header must equal the gaps assigned to that pillar in the data."""
+    problems = []
+    for pillar in data.PILLARS:
+        m = re.search(r"^\| \*\*" + re.escape(pillar) + r"\*\* \(([^)]*)\) \|", text, re.M)
+        expected = {g["id"] for g in data.GAPS if g["pillar"] == pillar}
+        if not m:
+            problems.append(f"markdown pillar table omits row for {pillar}")
+            continue
+        found = gap_ref_set(m.group(1))
+        if found != expected:
+            problems.append(f"pillar {pillar}: markdown gaps {sorted(found)} != data {sorted(expected)}")
+    return problems
+
+
+def check_roadmap_rows(text):
+    """The 'Gaps:' list of each roadmap phase bullet must equal the gaps sequenced into that phase in the data."""
+    problems = []
+    for phase, *_ in data.ROADMAP:
+        m = re.search(r"^- \*\*" + re.escape(phase) + r" — .*?Gaps: ([^\n]*)$", text, re.M)
+        expected = {g["id"] for g in data.GAPS if g["phase"] == phase}
+        if not m:
+            problems.append(f"markdown roadmap omits bullet for {phase}")
+            continue
+        found = gap_ref_set(m.group(1))
+        if found != expected:
+            problems.append(f"roadmap {phase}: markdown gaps {sorted(found)} != data {sorted(expected)}")
+    return problems
 
 
 def main():

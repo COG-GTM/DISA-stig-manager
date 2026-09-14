@@ -43,10 +43,10 @@ The sequence below is derived from the code paths cited in each step.
 3. **Bearer request.** The API middleware chain runs `validateToken` then `setupUser` on every `/api` request (`api/source/bootstrap/middlewares.js:79-80`).
 4. **Token validation.** `decodeToken` parses the JWT (`auth.js:36`); `checkInsecureKid` rejects the known test key unless `STIGMAN_DEV_ALLOW_INSECURE_TOKENS=true` (`auth.js:44-49`); `getSigningKey` looks up `kid` in the JWKS cache and refreshes once on a miss (`auth.js:51-60`); `verifyToken` calls `jwt.verify` with only an optional `audience` option (`auth.js:74-81`). Expiry and not-before are enforced by the library; issuer, algorithm list, clock tolerance and maximum age are not configured.
 5. **User setup.** The username is the first present claim in `[STIGMAN_JWT_USERNAME_CLAIM, preferred_username, STIGMAN_JWT_SERVICENAME_CLAIM, azp, client_id, clientId]` (`auth.js:110-111`). The user is loaded by username or created on first request (`auth.js:117`; `api/source/service/UserService.js:345-351, 500-556`). Privileges `admin` and `create_collection` are read from the claim path configured by `STIGMAN_JWT_PRIVILEGES_CLAIM`, default `realm_access.roles` (`auth.js:142-145`; `config.js:106-108`). A non-admin sending `?elevate=true` is rejected (`auth.js:147-149`).
-6. **Scope enforcement.** The OpenAPI validator calls `validateOauthSecurity` for every operation (`middlewares.js:111`; `auth.js:161-185`). A granted scope satisfies a required scope if equal or if it is a colon-separated prefix (`stig-manager:collection` satisfies `stig-manager:collection:read`).
+6. **Scope enforcement.** The OpenAPI validator calls `validateOauthSecurity` for every operation that declares scopes (`middlewares.js:111`; `auth.js:161-185`). Two operations declare `security: []` and answer without a token: `GET /op/configuration` (version, commit, last migration and all `config` table rows) and `GET /op/definition` (the OpenAPI document) (`stig-manager.yaml:3753, 3767`; `controllers/Operation.js:8-13`). `validateToken` verifies a token only when one is present (`auth.js:86-87`). A granted scope satisfies a required scope if equal or if it is a colon-separated prefix (`stig-manager:collection` satisfies `stig-manager:collection:read`).
 7. **Grant enforcement.** Collection operations call `getCollectionInfoAndCheckPermission`, which requires a grant at or above the minimum role (Restricted=1, Full=2, Manage=3, Owner=4; `api/source/utils/roles.js`) unless the operation supports elevation and `elevate=true` is present (`api/source/controllers/Collection.js:389-405`).
 8. **Logging.** Each request produces a JSON `request`/`transaction` record with `requestId`, time, source IP, method, URL, headers (bearer replaced by `true`, decoded payload attached as `headers.accessToken`), status and operation statistics (`logger.js:62-93, 155-183`). Application security errors are returned to the client and appear only as the transaction status; only non-application errors are written as `error` events (`api/source/bootstrap/errorHandlers.js:13-17`).
-9. **Logout.** The worker returns the provider `end_session_endpoint` for redirect (`oidc-worker.js:115-118`). No token revocation call is made.
+9. **Logout.** The worker returns the provider `end_session_endpoint` for redirect and does not clear its token state (`oidc-worker.js:114-119`); the page nulls its own facade fields and navigates (`init.js:217-223`). Another tab connected to the same shared worker keeps receiving the unchanged access token until `exp`. No token revocation call is made.
 
 *Figure 2. Login, token and API authorization sequence as implemented (editable source: `diagrams/auth-sequence.mmd`).*
 
@@ -86,13 +86,13 @@ Counts per pillar are derived from the register data (`scripts/icam_gap_data.py`
 - **Authentication (1.3 MFA, 1.8 Continuous Authentication).** The application relies on assertions. It cannot tell whether the IdP used a CAC/PIV, a software certificate or a password, because `acr`/`amr`/`auth_time` are not read (`auth.js:84-158`) (G-17). Tokens are valid until `exp` with no introspection or revocation (`auth.js:84-100`) (G-04).
 - **Identity (1.5 Identity Federation & User Credentialing).** `user_data.username` is UNIQUE and is the join key for grants and audit history; `sub` is unused (`auth.js:110-111`; `10-stigman-tables.sql`) (G-05). Accounts are created implicitly on first request (`UserService.js:351`) (G-06). NPEs share the same table and namespace via `azp`/`client_id`/`clientId` (G-07).
 - **Privilege (1.2 Conditional User Access, 1.7 Least Privilege, 1.4 PAM).** Two privileges from a Keycloak-shaped default claim path (`config.js:106-108`) (G-08). Elevation is per request, requires no re-authentication, and permits self-grant (`Collection.js:389-405`; `data-and-permissions.rst:189-191`) (G-09).
-- **Session.** Idle timeouts for admin and non-admin exist but default to 0 (`config.js:26-36`; `oidc-worker.js:471-476`) (G-16). PKCE S256 is enforced unless `STIGMAN_CLIENT_STRICT_PKCE=false` (`config.js:45`) (G-15). The worker logs the authorization code, PKCE verifier and full token response to the browser console (`oidc-worker.js:55, 542`) (G-14).
+- **Session.** Idle timeouts for admin and non-admin exist but default to 0 (`config.js:26-36`; `oidc-worker.js:471-476`) (G-16). PKCE S256 is always used (`oidc-worker.js:63, 266-267`); `STIGMAN_CLIENT_STRICT_PKCE=false` (`config.js:45`) only skips the provider-metadata check. Logout does not clear worker-held tokens or revoke the refresh token (`oidc-worker.js:114-119`) (G-15). The worker logs the authorization code, PKCE verifier and full token response to the browser console (`oidc-worker.js:55, 542`) (G-14).
 
 ### 4.2 Applications & Workloads detail
 
 - **Token policy (3.4 Resource Authorization & Integration).** `jwt.verify(tokenJWT, signingKey, options)` where `options` is `{audience}` only when `STIGMAN_JWT_AUD_VALUE` is set (`auth.js:75-77`). JWKS keys are filtered to `use=sig` and `kty` RSA/EC/OKP (`jwksCache.js:182-183`), which constrains algorithm families implicitly. Issuer is not checked (G-01, G-02, G-03).
 - **JWKS handling.** Cache refresh at half the configured maximum age, refresh on unknown `kid`, stale keys cleared, 10-second fetch timeout, configurable CA certificates (`jwksCache.js:14-17, 45-66, 85, 182-188`). This supports key rotation without restart. No gap recorded.
-- **Scope enforcement.** Every operation declares scopes; prefix matching is deliberate (`auth.js:170-178`) (G-10).
+- **Scope enforcement.** Every operation declares scopes except the two public `/op` operations (`stig-manager.yaml:3753, 3767`); prefix matching is deliberate (`auth.js:170-178`) (G-10).
 - **Configuration.** Defaults point at `http://localhost:8080/realms/stigman` for API, client and OpenAPI UI (`config.js:37, 89, 95`); the OpenAPI document embeds a literal discovery URL (`stig-manager.yaml:10895`) (G-18). A known test signing key is rejected unless a development flag is set (`auth.js:44-49`; `config.js:4, 97-99`) (G-24).
 - **Authorization model.** RBAC on local grants with no PDP or attribute input (G-19); see Section 6.
 
@@ -118,7 +118,7 @@ Status values: Satisfied / Partially / Not satisfied / Needs Government input. T
 
 | Control | Status | Evidence summary | Gaps |
 |---|---|---|---|
-| IA-2 | Partially | Bearer token required on every `/api` request (`auth.js:84-100`); identification by username claim | G-05, G-17 |
+| IA-2 | Partially | Bearer token required on every operation except `/op/configuration` and `/op/definition` (`auth.js:84-100`; `stig-manager.yaml:3753, 3767`); identification by username claim | G-05, G-10, G-17 |
 | IA-2(1) | Needs Government input | MFA is an IdP property; no `acr`/`amr` check | G-17 |
 | IA-2(2) | Needs Government input | As IA-2(1) | G-17 |
 | IA-2(12) | Needs Government input | PIV acceptance at IdP/proxy (`installation-and-setup.rst:57-62`) | G-17 |
@@ -127,7 +127,7 @@ Status values: Satisfied / Partially / Not satisfied / Needs Government input. T
 | IA-8 | Partially | Any IdP identity auto-provisioned | G-06, G-18 |
 | IA-9 | Partially | NPE via `azp`; DB client-certificate auth optional (`db.rst:125-136`) | G-07, G-21 |
 | AC-2 | Partially | Implicit creation; manual disable; no inactivity automation | G-06, G-25 |
-| AC-3 | Satisfied | Scope enforcement on every operation; grant checks | G-10 |
+| AC-3 | Partially | Scope enforcement on every operation; grant checks; two unauthenticated `/op` operations disclose version and `config` rows | G-10 |
 | AC-5 | Not satisfied | Admin self-grant | G-09 |
 | AC-6 | Partially | Four-level roles; broad elevation | G-08, G-09, G-10 |
 | AC-6(1) | Partially | `admin` + `elevate` required; no step-up | G-09 |
@@ -135,7 +135,7 @@ Status values: Satisfied / Partially / Not satisfied / Needs Government input. T
 | AC-6(10) | Satisfied | Non-admin elevation rejected (`auth.js:147-148`; `User.js:26`) | — |
 | AC-7 | Needs Government input | Logon attempts occur at IdP | G-17 |
 | AC-11 | Partially | Idle timeout disabled by default | G-16 |
-| AC-12 | Partially | End-session redirect; no revocation | G-04, G-15, G-16 |
+| AC-12 | Partially | End-session redirect; worker tokens not cleared on logout; no revocation | G-04, G-15, G-16 |
 | AC-17 | Partially | HTTPS optional in code (`server.js:45-48`) | G-20 |
 | AU-2 | Partially | Generic request/transaction events only | G-11, G-23 |
 | AU-3 | Partially | Time, source, URL, status present; subject/object/outcome not normalised | G-11, G-13 |
@@ -204,8 +204,8 @@ The target state keeps the application as an OIDC relying party and resource ser
 ## 10. Integration roadmap
 
 - **Phase 0 — Mobilise and baseline.** Activities: Receive DAF ICAM direction; confirm resource risk level (DoDI 8520.03 §3.3); confirm approved IdP; agree auditable-event list; stand up test environment with the approved IdP. Dependencies: None. Decision needed: Enterprise ICAM PMO: IdP, assertion profile, attribute release. AO: risk level. ISSM: auditable events. Gaps: G-26.
-- **Phase 1 — Harden the existing contract.** Activities: Mandatory audience; explicit algorithms and issuer; secure timeout defaults; audit event type; SIEM baseline; remove console token logging; TLS production mode; insecure-token warning; scope matrix and tests; self-grant policy and step-up design. Dependencies: Phase 0 values for algorithms, issuer, audience, timeouts. Decision needed: ISSM/Program Office: approve changes. AO: accept or reject self-grant compensating control. Gaps: G-01, G-02, G-09, G-10, G-11, G-12, G-14, G-16, G-20, G-24.
-- **Phase 2 — Enterprise identity integration.** Activities: Persistent identifier and migration; NPE entity type; privilege mapping from enterprise groups; `acr`/`amr` option; lifetime ceilings; DB mTLS default; secrets-manager reference deployment; log PII minimisation; export events. Dependencies: Phase 1; enterprise test realm; enclave PKI. Decision needed: Enterprise ICAM PMO: identifier and group standard. AO: migration risk. Privacy Officer: log attributes. Gaps: G-03, G-04, G-05, G-06, G-07, G-08, G-13, G-15, G-17, G-21, G-22, G-23.
+- **Phase 1 — Harden the existing contract.** Activities: Mandatory audience; explicit algorithms and issuer; secure timeout defaults; audit event type; SIEM baseline; remove console token logging; TLS production mode; insecure-token warning; public-operation inventory, scope matrix and tests; logout token clearing; self-grant policy and step-up design. Dependencies: Phase 0 values for algorithms, issuer, audience, timeouts. Decision needed: ISSM/Program Office: approve changes. AO: accept or reject self-grant compensating control. Gaps: G-01, G-02, G-09, G-10, G-11, G-12, G-14, G-15, G-16, G-20, G-24.
+- **Phase 2 — Enterprise identity integration.** Activities: Persistent identifier and migration; NPE entity type; privilege mapping from enterprise groups; `acr`/`amr` option; lifetime ceilings; DB mTLS default; secrets-manager reference deployment; log PII minimisation; export events. Dependencies: Phase 1; enterprise test realm; enclave PKI. Decision needed: Enterprise ICAM PMO: identifier and group standard. AO: migration risk. Privacy Officer: log attributes. Gaps: G-03, G-04, G-05, G-06, G-07, G-08, G-13, G-17, G-21, G-22, G-23.
 - **Phase 3 — Policy externalisation and federation.** Activities: PEP abstraction with optional PDP; trusted-issuer list; inactivity automation and deprovisioning hook; remove local defaults from production images. Dependencies: Phase 2 attribute mapping; PDP reachable. Decision needed: Enterprise ICAM PMO: PDP pattern and topology. Gaps: G-18, G-19, G-25.
 - **Phase 4 — Validate and authorise.** Activities: Execute test plan in the Government-approved environment; SIEM rule validation; ATO evidence; residual-risk acceptance. Dependencies: Phases 1-3 in test. Decision needed: AO: authorisation and residual risk. ISSM: witness. Gaps: —.
 
@@ -221,7 +221,7 @@ Testing of ICAM functions must occur in a Government-approved environment with t
 | CAC path | Authenticate with CAC at IdP; authenticate with password (if enabled) | API accepts only assertions carrying the required `acr`/`amr` when configured | Audit event includes authentication context |
 | Privilege | Non-admin with `elevate=true`; admin self-grant with policy on and off; step-up expired | 403 / denied / re-authentication required | Audit event `privilege-change`, `authz-denied` |
 | Scope | Client with only `stig-manager:collection:read` calls write operation | 403 `OutOfScopeError` | API test |
-| Session | Idle beyond configured limit; refresh token expired; logout | Client clears tokens; API rejects after `exp`; end-session invoked | Browser test, API log |
+| Session | Idle beyond configured limit; refresh token expired; logout with a second tab open | Idle and refresh failure clear worker tokens (`oidc-worker.js:329, 569, 583`); logout invokes end-session; as-is, the second tab retains the access token until `exp` (G-15) — after corrective action it must lose it | Browser test (two tabs), API log |
 | Audit | Execute each auditable event; forward to SIEM | Event parsed with subject, object, action, outcome, source | SIEM query |
 | Transport | Start API without TLS in production mode; DB without TLS | Startup refused unless explicit override | Startup log |
 
