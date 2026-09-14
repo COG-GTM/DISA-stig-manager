@@ -2,8 +2,8 @@
 
 **System:** STIG Manager (API, browser client, database schema, deployment assets in this repository)
 **Deliverable:** CDRL A009 — Cryptographic Inventory and PQC Readiness Assessment
-**Commit scanned:** `781f8a6e5ee67c9822f98f46f3cb9c3e155d7d13`
-**Generated:** 2026-09-14T22:46:02+00:00 by `scripts/crypto_inventory.py`
+**Commit scanned:** `e426316e995d04bff8ea7cdeb6803e5abce6dec1`
+**Generated:** 2026-09-14T22:57:35+00:00 by `scripts/crypto_inventory.py`
 **Companion files:** `Cryptographic-Inventory.xlsx`, `crypto-inventory.json` (same directory)
 
 > NO production cryptographic service is introduced, replaced, disabled, or reconfigured by this work — recommendations only, pending Government authorization.
@@ -59,7 +59,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `781f8a6e5ee67c9822f98f46f3cb9c3e155d7d13` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
+Scanned: every text file under the repository at commit `e426316e995d04bff8ea7cdeb6803e5abce6dec1` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
 
 Not scanned or out of scope:
 
@@ -79,6 +79,7 @@ What it does:
 - Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next 3 lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts.
 - Password hashing and KDF calls are matched as package calls or methods (bcrypt/bcryptjs/argon2 followed by any method such as hash, hashSync, compare, verify, including optional chaining), as node:crypto functions (pbkdf2/Sync, scrypt/Sync, hkdf/Sync) and as Web Crypto deriveBits/deriveKey/importKey with PBKDF2 or HKDF. Aliased imports (`const h = bcrypt.hash`, `import { hash } from 'bcrypt'`) are not followed.
 - Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %, {, *, &, < or ( are treated as references or placeholders.
+- Literal values decide the weak class, not only the option or API name: minVersion/maxVersion/secureProtocol below TLS 1.2 (SSLv2, SSLv3, TLSv1, TLSv1.1 and the *_method constants), cipher lists that enable RC4, DES/3DES, NULL, export or MD5 suites, createSign/createVerify/crypto.sign/verify and Web Crypto `hash:` parameters naming MD5 or SHA-1, createHmac('md5'), and createCipheriv names for DES, RC2, RC4, Blowfish, IDEA, SEED or CAST are classified `Deprecated/weak regardless of PQC` at priority 1. `rejectUnauthorized: false` keeps the protocol class but is raised to priority 1 with a stated gap. HMAC-SHA-1 stays in the Grover class (acceptable under SP 800-131A Rev. 2). JWK fields are matched in both JavaScript (`d: '...'`) and JSON (`"d": "..."`) spelling.
 - Context window of ±12 lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options.
 - Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed.
 - PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).
@@ -87,7 +88,7 @@ What it does:
 - If `node` is on PATH, the local runtime is probed for Node/OpenSSL versions, default TLS versions and ML-KEM/ML-DSA availability. This describes the scanning host, not the deployed container.
 - Secrets: only path, line and type are recorded; matched values are never written.
 - Certificate subject/issuer: only attribute types and self-signed status are recorded unless --dn-values is given.
-- Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it.
+- Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, secureProtocol, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it.
 
 Each row carries: asset ID, file:line, scope, category, algorithm, key size/curve, mode/options, purpose, library, protocol context, security relevance, quantum-vulnerability class, CNSA 2.0 target, crypto-agility rating, external dependency, migration priority (1–4) with a one-line rationale, recommended action and roadmap phase, and a redacted evidence string. Secret rows carry path, line and type only.
 
