@@ -2,8 +2,8 @@
 
 **System:** STIG Manager (API, browser client, database schema, deployment assets in this repository)
 **Deliverable:** CDRL A009 — Cryptographic Inventory and PQC Readiness Assessment
-**Commit scanned:** `8cfef9df0c6b1fea10450209e4639a74deb964e0`
-**Generated:** 2026-09-14T22:21:52+00:00 by `scripts/crypto_inventory.py`
+**Commit scanned:** `4da806210cd254dbf8c9e20b8d85bcbe564a2323`
+**Generated:** 2026-09-14T22:31:45+00:00 by `scripts/crypto_inventory.py`
 **Companion files:** `Cryptographic-Inventory.xlsx`, `crypto-inventory.json` (same directory)
 
 > NO production cryptographic service is introduced, replaced, disabled, or reconfigured by this work — recommendations only, pending Government authorization.
@@ -14,7 +14,7 @@ All counts and tables in this report are generated from `crypto-inventory.json` 
 
 STIG Manager is a web application that stores STIG evaluation results and POA&M-related data. It does not implement its own encryption of stored data. Its cryptography is concentrated in three places: (1) verification of OIDC access tokens signed by an external identity provider (IdP), (2) TLS for the API listener, the MySQL connection and the IdP connection, and (3) release signing in CI. Everything else is SHA-256 hashing for identifiers and content digests, and CSPRNG use in the browser.
 
-The scanner produced **144 inventory rows** from **364 files** using **58 detection rules**.
+The scanner produced **144 inventory rows** from **364 files** using **62 detection rules**.
 
 | Quantum-vulnerability class | Rows |
 |---|---|
@@ -59,7 +59,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `8cfef9df0c6b1fea10450209e4639a74deb964e0` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
+Scanned: every text file under the repository at commit `4da806210cd254dbf8c9e20b8d85bcbe564a2323` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
 
 Not scanned or out of scope:
 
@@ -78,7 +78,7 @@ What it does:
 - Regex scan of text files (extensions: .bat, .cjs, .cnf, .conf, .csv, .env, .example, .html, .ini, .js, .json, .md, .mjs, .properties, .py, .rst, .sh, .sql, .toml, .ts, .txt, .yaml, .yml; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.
 - Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next 3 lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts.
 - Context window of ±12 lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options.
-- Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Encrypted keys, binary keystores and unreadable files are recorded as not parsed.
+- Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed.
 - PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).
 - package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.
 - Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.
@@ -99,7 +99,7 @@ Priority scale: **1** act in Phase 1 or blocks later phases; **2** Phase 1/2 con
 - Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.
 - TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.
 - Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its own output (the canonical docs/security/crypto-inventory directory, any in-repository --out directory, and the concrete JSON/XLSX/report/template output paths, so that `--out .` does not inventory the previous run) are not pattern-scanned.
-- Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. A PEM block may span at most 400 lines; longer blocks are recorded as not parsed. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed.
+- Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. A PEM block may span at most 400 lines; longer blocks are recorded as not parsed. Binary keystores (.p12, .pfx, .jks) are inventoried by path only; their contents are not parsed (password required).
 - Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.
 - Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).
 - The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.
