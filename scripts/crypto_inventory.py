@@ -152,10 +152,10 @@ METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
     "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next %d lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts." % (CALL_WINDOW - 1),
     "Password hashing and KDF calls are matched as package calls or methods (bcrypt/bcryptjs/argon2 followed by any method such as hash, hashSync, compare, verify, including optional chaining), as node:crypto functions (pbkdf2/Sync, scrypt/Sync, hkdf/Sync) and as Web Crypto deriveBits/deriveKey/importKey with PBKDF2 or HKDF. Aliased imports (`const h = bcrypt.hash`, `import { hash } from 'bcrypt'`) are not followed.",
-    "Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %, {, *, &, < or ( are treated as references or placeholders.",
+    "Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %, {, *, &, <, ( or [ are treated as references or placeholders whether or not they are quoted (`STIGMAN_DB_PASSWORD=\"${DB_PASSWORD}\"` is a reference, not a literal).",
     "Literal values decide the weak class, not only the option or API name: minVersion/maxVersion/secureProtocol below TLS 1.2 (SSLv2, SSLv3, TLSv1, TLSv1.1 and the *_method constants), cipher lists that enable RC4, DES/3DES, NULL, export or MD5 suites, createSign/createVerify/crypto.sign/verify and Web Crypto `hash:` parameters naming MD5 or SHA-1, createHmac('md5'), and createCipheriv names for DES, RC2, RC4, Blowfish, IDEA, SEED or CAST are classified `Deprecated/weak regardless of PQC` at priority 1. `rejectUnauthorized: false` keeps the protocol class but is raised to priority 1 with a stated gap. HMAC-SHA-1 stays in the Grover class (acceptable under SP 800-131A Rev. 2). JWK fields are matched in both JavaScript (`d: '...'`) and JSON (`\"d\": \"...\"`) spelling.",
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
-    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
+    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row. The `openssl` fallback normalises its output to the same algorithm labels and sizes as the `cryptography` path (RSA-<bits>, DSA-<bits>, curve name, Ed25519), so RSA/DSA below 2048 bits and SHA-1 signatures are classified weak on either parser; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
     "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
     "package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.",
     "Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.",
@@ -192,6 +192,10 @@ RULES: list[dict] = []
 # Argument text up to an option of interest, allowing one level of nested
 # parentheses (e.g. `enc.encode(pw)`) inside the call being matched.
 _NESTED_ARGS = r"(?:[^()]|\([^()]*\))*?"
+# A credential value that starts with one of these characters is a reference
+# or placeholder (`$VAR`, `${VAR}`, `%VAR%`, `{{ var }}`, `*anchor`,
+# `<placeholder>`, `(...)`, `[...]`), quoted or not, never a literal secret.
+_NOT_REF = r"(?![$%{*&<(\[])"
 
 
 def rule(**kw):
@@ -1230,8 +1234,8 @@ rule(
 rule(
     id="SECRET-DB-PASSWORD-LITERAL",
     # Value: a quoted scalar, or an unquoted scalar up to whitespace or a
-    # comment. Values starting with `$` are references, not literals.
-    regex=r"\b(STIGMAN_DB_PASSWORD|MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)\b\s*[:=]\s*(?:'[^'\n]{3,}'|\"[^\"\n]{3,}\"|[^\s'\"$#][^\s#]{2,})",
+    # comment. Reference-shaped values are skipped whether quoted or not.
+    regex=r"\b(STIGMAN_DB_PASSWORD|MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)\b\s*[:=]\s*(?:'" + _NOT_REF + r"[^'\n]{3,}'|\"" + _NOT_REF + r"[^\"\n]{3,}\"|" + _NOT_REF + r"[^\s'\"#][^\s#]{2,})",
     category="Secret", algorithm="Database password literal", purpose="Credential literal (type: database password)", library="",
     qclass=Q_NA, cnsa=CNSA_NONE, agility=AGILITY_HARD, priority=3,
     rationale="Literal credential in test/CI configuration; must not be reused in production.", evidence="label", label="[redacted] database password literal",
@@ -1241,7 +1245,7 @@ rule(
 
 rule(
     id="SECRET-GENERIC-LITERAL",
-    regex=r"(?i)\b(password|passwd|client_secret|api[_-]?key|secret_key|passphrase)\b['\"]?\s*[:=]\s*['\"][^'\"$]{4,}['\"]",
+    regex=r"(?i)\b(password|passwd|client_secret|api[_-]?key|secret_key|passphrase)\b['\"]?\s*[:=]\s*['\"]" + _NOT_REF + r"[^'\"$]{4,}['\"]",
     category="Secret", algorithm="Credential literal", purpose="Credential literal (type from identifier name)", library="",
     qclass=Q_NA, cnsa=CNSA_NONE, agility=AGILITY_HARD, priority=3, rationale="Literal credential assignment.",
     evidence="label", label="[redacted] credential literal",
@@ -1255,7 +1259,7 @@ rule(
     # (`$VAR`, `${VAR}`, `%VAR%`, `{{ var }}`, `*anchor`, `<placeholder>`)
     # are not literals. Code files are excluded: an unquoted value there is
     # an identifier, not a credential.
-    regex=r"(?i)\b(password|passwd|client_secret|api[_-]?key|secret_key|passphrase)\b\s*[:=]\s*(?![\"'$%{*&<(\[])[^\s#,;]{4,}",
+    regex=r"(?i)\b(password|passwd|client_secret|api[_-]?key|secret_key|passphrase)\b\s*[:=]\s*(?![\"'])" + _NOT_REF + r"[^\s#,;]{4,}",
     category="Secret", algorithm="Credential literal", purpose="Credential literal (type from identifier name)", library="",
     qclass=Q_NA, cnsa=CNSA_NONE, agility=AGILITY_HARD, priority=3, rationale="Literal credential assignment (unquoted scalar).",
     evidence="label", label="[redacted] credential literal",
@@ -1334,20 +1338,33 @@ def _describe_public_key(pub) -> dict:
     return {"key_algorithm": type(pub).__name__, "key_size": "", "curve": ""}
 
 
+# `openssl` algorithm identifiers -> the labels _describe_public_key uses.
+_OPENSSL_KEY_ALG_NAMES = {
+    "rsa": "RSA", "rsaencryption": "RSA", "rsassapss": "RSA", "rsassa-pss": "RSA",
+    "dsa": "DSA", "dsaencryption": "DSA",
+    "ec": "ECDSA", "id-ecpublickey": "ECDSA",
+    "ed25519": "Ed25519", "ed448": "Ed448", "x25519": "X25519", "x448": "X448",
+}
+
+
 def _parse_openssl_key_text(out: str) -> dict:
+    """Key algorithm and size from `openssl pkey -text` output or from the
+    Subject Public Key Info section of `openssl x509 -text`, normalised to the
+    values _describe_public_key produces (RSA-<bits>, DSA-<bits>, curve name,
+    Ed25519) so that the same strength rules apply on both parser paths."""
     info = {"parser": "openssl"}
-    am = re.search(r"^(RSA|EC|DSA|ED25519|ED448|X25519|X448)?\s*(?:Public-Key|Private-Key):\s*(?:\((\d+) bit\))?", out, re.M)
-    if am:
-        alg = (am.group(1) or "").upper()
-        bits = am.group(2)
-        cm = re.search(r"(?:NIST CURVE|ASN1 OID): (\S+)", out)
-        if cm:
-            info.update({"key_algorithm": "ECDSA", "key_size": cm.group(1), "curve": cm.group(1)})
-        elif alg in ("ED25519", "ED448", "X25519", "X448"):
-            name = alg.capitalize()
-            info.update({"key_algorithm": name, "key_size": name, "curve": name})
-        elif bits:
-            info.update({"key_algorithm": alg or "RSA", "key_size": f"{alg or 'RSA'}-{bits}", "curve": f"{alg or 'RSA'}-{bits}"})
+    am = re.search(r"^\s*(RSA|EC|DSA|ED25519|ED448|X25519|X448)?\s*(?:Public-Key|Private-Key):\s*(?:\((\d+) bit\))?", out, re.M | re.I)
+    pm = re.search(r"Public Key Algorithm:\s*(\S+)", out)
+    alg = _OPENSSL_KEY_ALG_NAMES.get(((am and am.group(1)) or (pm and pm.group(1)) or "").lower(), "")
+    bits = am.group(2) if am else None
+    cm = re.search(r"(?:NIST CURVE|ASN1 OID): (\S+)", out)
+    if cm:
+        info.update({"key_algorithm": "ECDSA", "key_size": cm.group(1), "curve": cm.group(1)})
+    elif alg in ("Ed25519", "Ed448", "X25519", "X448"):
+        info.update({"key_algorithm": alg, "key_size": alg, "curve": alg})
+    elif bits:
+        alg = alg or "RSA"
+        info.update({"key_algorithm": alg, "key_size": f"{alg}-{bits}", "curve": f"{alg}-{bits}"})
     return info
 
 
@@ -1431,14 +1448,12 @@ def parse_certificate_der(der: bytes) -> dict:
         try:
             out = subprocess.run(["openssl", "x509", "-inform", "DER", "-noout", "-subject", "-issuer", "-dates", "-text"],
                                  input=der, capture_output=True, check=True).stdout.decode(errors="replace")
-            info = {"parser": "openssl"}
+            info = _parse_openssl_key_text(out)
             for key, pat in (("subject", r"subject=(.*)"), ("issuer", r"issuer=(.*)"), ("not_before", r"notBefore=(.*)"),
-                             ("not_after", r"notAfter=(.*)"), ("signature_algorithm", r"Signature Algorithm: (\S+)"),
-                             ("key_algorithm", r"Public Key Algorithm: (\S+)"), ("curve", r"(?:NIST CURVE|ASN1 OID): (\S+)|Public-Key: \((\d+ bit)\)")):
+                             ("not_after", r"notAfter=(.*)"), ("signature_algorithm", r"Signature Algorithm: (\S+)")):
                 mm = re.search(pat, out)
                 if mm:
-                    info[key] = next(g for g in mm.groups() if g) if mm.groups() else mm.group(0)
-            info["key_size"] = info.get("curve", "")
+                    info[key] = mm.group(1).strip()
             subj, iss = info.get("subject"), info.get("issuer")
             info["subject"] = _dn_summary(text=subj, other=iss)
             info["issuer"] = _dn_summary(text=iss, other=subj)
