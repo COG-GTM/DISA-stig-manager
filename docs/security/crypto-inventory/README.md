@@ -22,6 +22,10 @@ Useful options:
 | `--repo PATH` | Scan a different checkout. |
 | `--no-xlsx` | Write JSON and the report only. |
 
+### Commit SHA recorded in the artifacts
+
+`summary.commit_sha` is HEAD of the checkout when the scan ran, and `summary.source_tree_vs_commit` states whether the scanned source matched that commit. Generated artifacts are committed on top of the source they describe, so the SHA inside an artifact is the parent of the commit that adds the artifact. To reproduce, check out the recorded SHA and run the command above; the inventory rows should match. Run the scan from a checkout with no uncommitted source changes so the state reads `clean`.
+
 ## Prerequisites
 
 - Python 3.10 or later (standard library only for scanning).

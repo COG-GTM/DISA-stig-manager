@@ -64,7 +64,8 @@ AGILITY_NA = "N/A"
 
 EXCLUDE_DIR_NAMES = {
     "node_modules", "dist", ".git", "_build", ".nyc_output", "coverage",
-    "mochawesome-report", "__pycache__", ".pytest_cache", "uploads",
+    "mochawesome-report", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    ".venv", "venv", "uploads",
 }
 # Vendored third-party code. Relative posix paths.
 EXCLUDE_DIR_PATHS = {"client/src/ext", "docs/security/crypto-inventory", "test/api/form-data-files"}
@@ -147,6 +148,7 @@ CRYPTO_LIBRARIES = OrderedDict([
 
 METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
+    "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present.",
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
     "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI." % ", ".join(sorted(CERT_EXTENSIONS)),
     "Embedded certificates and public keys are parsed from PEM blocks, JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
@@ -168,6 +170,7 @@ METHOD_LIMITS = [
     "Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).",
     "The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.",
     "Occurrences of the same JWT literal pattern inside a single test file are collapsed to one row (first line, count in the rationale).",
+    "`commit_sha` is HEAD of the checkout at scan time and `source_tree_vs_commit` records whether the scanned source matched it. Because the generated artifacts are committed on top of that source, the SHA recorded inside an artifact is always the parent of the commit that adds the artifact, never that commit itself.",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -241,6 +244,88 @@ rule(
     priority=3, rationale="Generates the signing key pair used to issue tokens; algorithm and size are literals in code.",
     refine=_refine_rsa_keygen, action="Replace with configurable key type/size; add ML-DSA option when jsonwebtoken or a successor library supports it.",
     phase="Phase 3", gap="Key algorithm and modulus length are literals in code.",
+)
+
+_ASYM_KEYGEN_TYPES = {
+    "ec": ("ECDSA/ECDH (EC key pair)", CNSA_SIG),
+    "ed25519": ("Ed25519 (EdDSA)", CNSA_SIG),
+    "ed448": ("Ed448 (EdDSA)", CNSA_SIG),
+    "x25519": ("X25519 (ECDH)", CNSA_KEM),
+    "x448": ("X448 (ECDH)", CNSA_KEM),
+    "dsa": ("DSA", CNSA_SIG),
+    "dh": ("Finite-field DH", CNSA_KEM),
+}
+
+
+def _refine_asym_keygen(f, lines, idx, m):
+    kind = m.group(1).lower()
+    f["algorithm"], f["cnsa"] = _ASYM_KEYGEN_TYPES[kind]
+    # Options object of this call only: stop at the statement terminator.
+    ctx = (lines[idx][m.end():] + "\n" + "\n".join(lines[idx + 1:idx + 7])).split(";", 1)[0]
+    cm = re.search(r"namedCurve:\s*['\"]([\w-]+)['\"]", ctx)
+    if cm:
+        f["key_size"] = cm.group(1)
+    elif kind in ("ed25519", "x25519"):
+        f["key_size"] = "255-bit curve"
+    elif kind in ("ed448", "x448"):
+        f["key_size"] = "448-bit curve"
+    km = re.search(r"(?:modulusLength|primeLength):\s*(\d+)", ctx)
+    if km:
+        f["key_size"] = f"{kind.upper()}-{km.group(1)}"
+
+
+rule(
+    id="ASYM-KEYGEN",
+    regex=r"generateKeyPair(?:Sync)?\(\s*['\"](ec|ed25519|ed448|x25519|x448|dsa|dh)['\"]",
+    category="Asymmetric", algorithm="Asymmetric key pair generation", purpose="Key pair generation",
+    library="node:crypto", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
+    rationale="Key type is a literal at the call site.", refine=_refine_asym_keygen,
+    action="Make the key type configurable; plan ML-DSA or ML-KEM replacement.", phase="Phase 3",
+)
+
+
+def _refine_ecdh(f, lines, idx, m):
+    if m.group(1):
+        f["key_size"] = m.group(1)
+
+
+rule(
+    id="ASYM-ECDH",
+    regex=r"createECDH\(\s*(?:['\"]([\w-]+)['\"])?|\bcrypto\.diffieHellman\(|\bcomputeSecret\(",
+    category="Asymmetric", algorithm="ECDH key agreement", purpose="Key exchange", library="node:crypto",
+    qclass=Q_SHOR, cnsa=CNSA_KEM, agility=AGILITY_HARD, priority=2,
+    rationale="Elliptic-curve key agreement is broken by Shor; the exchanged secret is exposed to harvest-now-decrypt-later.",
+    refine=_refine_ecdh, action="Replace with ML-KEM (FIPS 203) or a hybrid construction.", phase="Phase 2",
+)
+
+rule(
+    id="ASYM-DH",
+    regex=r"createDiffieHellman(?:Group)?\(\s*(?:['\"]?(\w+)['\"]?)?|\bgetDiffieHellman\(\s*['\"](\w+)['\"]",
+    category="Asymmetric", algorithm="Finite-field DH key agreement", purpose="Key exchange", library="node:crypto",
+    qclass=Q_SHOR, cnsa=CNSA_KEM, agility=AGILITY_HARD, priority=2,
+    rationale="Finite-field DH is broken by Shor; the exchanged secret is exposed to harvest-now-decrypt-later.",
+    refine=lambda f, lines, idx, m: f.__setitem__("key_size", m.group(1) or m.group(2) or ""),
+    action="Replace with ML-KEM (FIPS 203) or a hybrid construction.", phase="Phase 2",
+)
+
+rule(
+    id="ASYM-SIGN-VERIFY",
+    regex=r"createSign\(\s*['\"]([\w-]+)['\"]|createVerify\(\s*['\"]([\w-]+)['\"]|\bcrypto\.(sign|verify)\(",
+    category="Asymmetric", algorithm="Digital signature (algorithm follows key type)", purpose="Signature generation or verification",
+    library="node:crypto", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
+    rationale="Signature operation whose algorithm is set by the supplied key; RSA/ECDSA/EdDSA keys are quantum-vulnerable.",
+    refine=lambda f, lines, idx, m: f.__setitem__("mode", (m.group(1) or m.group(2) or "").upper()),
+    action="Plan ML-DSA (FIPS 204) keys once Node exposes them for this API.", phase="Phase 3",
+)
+
+rule(
+    id="ASYM-WEBCRYPTO",
+    regex=r"subtle\.(generateKey|importKey|sign|verify|deriveBits|deriveKey|encrypt|decrypt)\([^)]*?name:\s*['\"](ECDSA|ECDH|Ed25519|X25519|RSA-PSS|RSASSA-PKCS1-v1_5|RSA-OAEP)['\"]",
+    category="Asymmetric", algorithm="Web Crypto asymmetric operation", purpose="Browser-side public-key operation",
+    library="Web Crypto (crypto.subtle)", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
+    rationale="Public-key algorithm is a literal in browser code.",
+    refine=lambda f, lines, idx, m: (f.__setitem__("algorithm", m.group(2)), f.__setitem__("mode", m.group(1)),
+                                     f.__setitem__("cnsa", CNSA_KEM if m.group(2) in ("ECDH", "X25519", "RSA-OAEP") else CNSA_SIG)),
 )
 
 
@@ -486,8 +571,8 @@ rule(
 # ---- Symmetric ----------------------------------------------------------- #
 
 
-def _refine_symmetric(f, lines, idx, m):
-    tok = m.group(0).upper()
+def _classify_symmetric(f, tok):
+    tok = tok.upper()
     if "CHACHA" in tok:
         f["algorithm"] = "ChaCha20-Poly1305"
     elif "3DES" in tok or "DES-EDE" in tok or "TRIPLEDES" in tok:
@@ -508,12 +593,31 @@ def _refine_symmetric(f, lines, idx, m):
             f["mode"] = mm.group(1)
 
 
+def _refine_cipheriv(f, lines, idx, m):
+    f["library"] = "node:crypto"
+    if m.group(1):
+        _classify_symmetric(f, m.group(1))
+    else:
+        f["algorithm"] = "Symmetric cipher (algorithm supplied at runtime)"
+        f["agility"] = AGILITY_CONFIG
+        f["rationale"] = "Cipher name is not a literal at the call site; resolve the value in configuration."
+
+
+rule(
+    id="SYM-CIPHERIV",
+    regex=r"create(?:C|Dec)ipheriv\(\s*(?:['\"]([\w-]+)['\"])?",
+    category="Symmetric", algorithm="Symmetric cipher", purpose="Encryption / decryption", library="node:crypto",
+    qclass=Q_GROVER, cnsa=CNSA_SYM, agility=AGILITY_HARD, priority=3, rationale="Cipher call in code.",
+    refine=_refine_cipheriv,
+)
+
 rule(
     id="SYM-CIPHER",
-    regex=r"\baes-(?:128|192|256)-(?:gcm|cbc|ctr|ecb|ccm)\b|\bAES-(?:GCM|CBC|CTR)\b|createCipheriv\(|createDecipheriv\(|\bChaCha20(?:-Poly1305)?\b|\b3DES\b|\bdes-ede3(?:-cbc)?\b|\bTripleDES\b",
+    regex=r"\baes-(?:128|192|256)-(?:gcm|cbc|ctr|ecb|ccm)\b|\bAES-(?:GCM|CBC|CTR)\b|\bChaCha20(?:-Poly1305)?\b|\b3DES\b|\bdes-ede3(?:-cbc)?\b|\bTripleDES\b",
     category="Symmetric", algorithm="Symmetric cipher", purpose="Encryption", library="",
     qclass=Q_GROVER, cnsa=CNSA_SYM, agility=AGILITY_HARD, priority=3, rationale="Symmetric cipher literal in code.",
-    refine=_refine_symmetric,
+    refine=lambda f, lines, idx, m: _classify_symmetric(f, m.group(0)),
+    not_file_re=r"create(?:C|Dec)ipheriv\(",
 )
 
 # ---- TLS ----------------------------------------------------------------- #
@@ -1172,12 +1276,16 @@ class Scanner:
         keys = data.get("keys") if isinstance(data, dict) else None
         if not isinstance(keys, list):
             return
-        lines = text.split("\n")
-        for k in keys:
-            if not isinstance(k, dict):
-                continue
+        # JWKS-JSON-KEY rows are appended in document order (finditer per line),
+        # and json.loads preserves array order, so the i-th structured key that
+        # the rule can match pairs with the i-th row for this file. This holds
+        # for pretty-printed and single-line JWKS alike.
+        rows = [f for f in self.findings if f["rule"] == "JWKS-JSON-KEY" and f["file"] == rel]
+        structured = [k for k in keys if isinstance(k, dict) and k.get("kty") in ("RSA", "EC", "OKP", "oct")]
+        paired = list(zip(structured, rows)) if len(structured) == len(rows) else [(k, None) for k in structured]
+        for k, f in paired:
             kid = k.get("kid", "")
-            line = next((i + 1 for i, ln in enumerate(lines) if kid and kid in ln), 1)
+            line = f["line"] if f else 1
             bits = None
             if k.get("kty") == "RSA" and k.get("n"):
                 n = k["n"]
@@ -1185,16 +1293,16 @@ class Scanner:
                     bits = int.from_bytes(base64.urlsafe_b64decode(n + "=" * (-len(n) % 4)), "big").bit_length()
                 except Exception:
                     bits = None
-            for f in self.findings:
-                if f["rule"] == "JWKS-JSON-KEY" and f["file"] == rel and f["line"] >= line - 3 and not f["key_size"]:
-                    if bits:
-                        f["key_size"] = f"RSA-{bits}"
-                        if bits < 2048:
-                            f["qclass"] = Q_WEAK
-                            f["rationale"] = f"RSA-{bits} is below the SP 800-131A Rev. 2 floor. " + f["rationale"]
-                    if k.get("alg"):
-                        f["algorithm"] += f", alg={k['alg']}"
-                    break
+            if f is not None:
+                if bits:
+                    f["key_size"] = f"RSA-{bits}"
+                    if bits < 2048:
+                        f["qclass"] = Q_WEAK
+                        f["rationale"] = f"RSA-{bits} is below the SP 800-131A Rev. 2 floor. " + f["rationale"]
+                elif k.get("kty") in ("EC", "OKP") and k.get("crv"):
+                    f["key_size"] = k["crv"]
+                if k.get("alg"):
+                    f["algorithm"] += f", alg={k['alg']}"
             for j, c in enumerate(k.get("x5c") or []):
                 try:
                     info = parse_certificate_der(base64.b64decode(c))
@@ -1218,7 +1326,10 @@ class Scanner:
         blocks = [(m.group(1), m.group(2), text.count("\n", 0, m.start()) + 1)
                   for m in re.finditer(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", text, re.S)]
         if not blocks:
-            info = parse_certificate_der(data)
+            try:
+                info = parse_certificate_der(data)
+            except Exception as e:  # noqa: BLE001
+                info = {"parser": "none", "error": f"not parsed: {e}"}
             entry.update(info)
             self.certificates.append(entry)
             return None
@@ -1227,7 +1338,10 @@ class Scanner:
             e["line"] = line
             e["source"] = f"PEM {kind}"
             if kind == "CERTIFICATE":
-                e.update(parse_certificate_der(base64.b64decode(re.sub(r"\s+", "", body))))
+                try:
+                    e.update(parse_certificate_der(base64.b64decode(re.sub(r"\s+", "", body), validate=True)))
+                except Exception as ex:  # noqa: BLE001
+                    e.update({"parser": "none", "error": f"malformed PEM certificate block: {ex}"})
             elif "PRIVATE KEY" in kind:
                 e.update({"parser": "none", "error": "private key present; not parsed", "key_algorithm": kind})
             else:
@@ -1403,7 +1517,7 @@ console.log(JSON.stringify(out));
                              "phase": f["phase"] or "Phase 3", "rationale": f["rationale"]})
         return rows
 
-    def summary(self, commit: str, generated: str) -> dict:
+    def summary(self, commit: str, generated: str, tree_state: str) -> dict:
         by_class = Counter(f["qclass"] for f in self.findings)
         by_priority = Counter(f["priority"] for f in self.findings)
         by_category = Counter(f["category"] for f in self.findings)
@@ -1412,6 +1526,7 @@ console.log(JSON.stringify(out));
         return {
             "generated_utc": generated,
             "commit_sha": commit,
+            "source_tree_vs_commit": tree_state,
             "files_scanned": self.files_scanned,
             "files_skipped": self.files_skipped,
             "rules": len(RULES),
@@ -1448,12 +1563,29 @@ def git_commit(repo: Path) -> str:
         return "unknown"
 
 
+def git_tree_state(repo: Path, ignore_dirs: set[str]) -> str:
+    """Whether the scanned source matches HEAD. The output directory is ignored
+    because the artifacts themselves are always newer than the commit they
+    record: they are committed on top of the SHA they were generated from."""
+    try:
+        out = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+                             capture_output=True, text=True, check=True).stdout
+    except Exception:
+        return "unknown (git status unavailable)"
+    ignored = {"docs/security/crypto-inventory"} | set(ignore_dirs)
+    changed = [ln[3:] for ln in out.splitlines() if ln.strip()
+               and not any(ln[3:].startswith(d + "/") for d in ignored)
+               and not ln[3:].startswith(".ruff_cache/")]
+    return "clean: scanned source equals HEAD" if not changed else f"modified: {len(changed)} source path(s) differ from HEAD"
+
+
 def build_document(scanner: Scanner, repo: Path) -> dict:
     generated = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     commit = git_commit(repo)
+    tree_state = git_tree_state(repo, scanner.extra_exclude_dirs)
     return OrderedDict([
         ("schema_version", "1.0"),
-        ("summary", scanner.summary(commit, generated)),
+        ("summary", scanner.summary(commit, generated, tree_state)),
         ("method", {"checks": METHOD_CHECKS, "limits": METHOD_LIMITS,
                     "excluded_dirs": sorted(EXCLUDE_DIR_NAMES | EXCLUDE_DIR_PATHS | scanner.extra_exclude_dirs),
                     "parsers": {"cryptography": HAVE_CRYPTOGRAPHY, "openssl_cli": HAVE_OPENSSL_CLI}}),
@@ -1575,7 +1707,8 @@ def write_xlsx(doc: dict, path: Path):
     ws = wb.create_sheet("Summary")
     ws.column_dimensions["A"].width = 48
     ws.column_dimensions["B"].width = 60
-    kv = [("Generated (UTC)", s["generated_utc"]), ("Commit SHA scanned", s["commit_sha"]), ("Files pattern-scanned", s["files_scanned"]),
+    kv = [("Generated (UTC)", s["generated_utc"]), ("Commit SHA scanned", s["commit_sha"]), ("Source tree vs. commit", s["source_tree_vs_commit"]),
+          ("Files pattern-scanned", s["files_scanned"]),
           ("Files skipped (binary/oversize/excluded type)", s["files_skipped"]), ("Detection rules", s["rules"]), ("Inventory rows", s["total_findings"]),
           ("Certificates parsed", s["certificates_parsed"]), ("Certificate entries not parsed", s["certificates_unparsed"]), ("Libraries inventoried", s["libraries"])]
     for k, v in kv:
@@ -1653,6 +1786,7 @@ def render_report(doc: dict, template: Path, out: Path):
 
     ctx = {
         "COMMIT_SHA": s["commit_sha"],
+        "SOURCE_TREE_STATE": s["source_tree_vs_commit"],
         "GENERATED_UTC": s["generated_utc"],
         "TOTAL_ROWS": s["total_findings"],
         "FILES_SCANNED": s["files_scanned"],

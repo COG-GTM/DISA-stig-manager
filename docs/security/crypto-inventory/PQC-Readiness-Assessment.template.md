@@ -53,7 +53,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `{{COMMIT_SHA}}` except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing.
+Scanned: every text file under the repository at commit `{{COMMIT_SHA}}` (source tree state at scan time: {{SOURCE_TREE_STATE}}) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
 
 Not scanned or out of scope:
 
