@@ -1,0 +1,59 @@
+%% Actual login -> token -> API authorization flow, derived from source.
+%% Evidence: client/src/js/workers/oidc-worker.js:55-67,259-270,335-410,420-421,556-563;
+%% api/source/utils/auth.js:36,44-49,51-72,74-100,103-158,161-185;
+%% api/source/utils/jwksCache.js:45-70,182-190; api/source/controllers/Collection.js:389-405;
+%% api/source/utils/logger.js:79-95,160-172; api/source/bootstrap/errorHandlers.js:12-28
+sequenceDiagram
+  autonumber
+  participant U as User (browser)
+  participant W as OIDC worker<br/>oidc-worker.js
+  participant IdP as OIDC provider<br/>(Keycloak or compatible)
+  participant RP as Reverse proxy<br/>(deployment: TLS, CAC/mTLS)
+  participant A as API middleware<br/>auth.js
+  participant J as JWKS cache<br/>jwksCache.js
+  participant C as Controller<br/>Collection.js
+  participant DB as MySQL<br/>user_data / collection_grant
+  participant L as logger.js -> STDOUT
+
+  U->>W: open application
+  W->>W: generate PKCE verifier, S256 challenge, nonce (oidc-worker.js:259-267)
+  W->>IdP: GET /authorize response_type=code, scope, code_challenge
+  Note over IdP: Authentication method (CAC/PIV, password, MFA)<br/>is decided by the IdP. Application receives only the token.
+  IdP-->>W: redirect with authorization code
+  W->>IdP: POST /token grant_type=authorization_code + code_verifier (oidc-worker.js:55-67)
+  IdP-->>W: access_token, refresh_token (held in worker memory)
+  W->>W: validateAudience (only if configured), validateClaims (scope, username, privileges) (oidc-worker.js:420-421,457-490)
+  W->>W: schedule refresh at exp, optional idle timer (admin/user) (oidc-worker.js:335-410)
+
+  U->>W: API action
+  W->>RP: HTTPS request, Authorization: Bearer <JWT>
+  RP->>A: forward request (HTTP or TLS per STIGMAN_API_TLS_*)
+  A->>A: decodeToken (jwt.decode complete) (auth.js:36)
+  A->>A: checkInsecureKid (auth.js:44-49)
+  A->>J: getSigningKey(kid) (auth.js:51-72)
+  alt kid unknown
+    J->>IdP: refresh JWKS (10 s timeout, optional CA) (jwksCache.js:45-70)
+    IdP-->>J: keys (filtered: use=sig, kty RSA/EC/OKP) (jwksCache.js:182-190)
+  end
+  J-->>A: public key or "unknown"
+  A->>A: jwt.verify(token, key, {audience?}) (auth.js:74-81)<br/>signature, exp, nbf, no issuer option, no clockTolerance
+  A->>A: setupUser: username = first present of<br/>[STIGMAN_JWT_USERNAME_CLAIM, preferred_username, servicename, azp, client_id, clientId] (auth.js:110-115)
+  A->>DB: getUserObject(username) (UserService.js:500-556)
+  alt first login
+    A->>DB: INSERT user_data {username, lastAccess, lastClaims} (UserService.js:345-351)
+  end
+  A->>A: privileges.admin / create_collection from realm_access.roles (auth.js:142-145)<br/>reject elevate=true for non-admin (auth.js:147-149)
+  A->>A: validateOauthSecurity: token scope vs OpenAPI required scopes, prefix match (auth.js:161-185)
+  A->>C: request with req.userObject
+  C->>C: getCollectionInfoAndCheckPermission: grant.roleId >= minimumRole<br/>or (supportsElevation && elevate) (Collection.js:389-405)
+  alt insufficient role
+    C-->>A: PrivilegeError 403
+    A->>L: not logged as an error, visible only in transaction record (errorHandlers.js:13-18, logger.js:160-172)
+  else authorized
+    C->>DB: query / mutate
+    C-->>W: 200 response
+    A->>L: transaction record: requestId, source ip, url, decoded token claims, status (logger.js:79-95)
+  end
+
+  U->>W: logout
+  W->>IdP: redirect to end_session_endpoint (oidc-worker.js:114-119), worker token state not cleared (G-15)

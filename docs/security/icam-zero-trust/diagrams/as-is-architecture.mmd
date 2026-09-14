@@ -1,0 +1,48 @@
+%% As-is identity architecture, derived from source.
+%% Evidence: api/source/bootstrap/middlewares.js:79-111, api/source/utils/auth.js,
+%% api/source/utils/jwksCache.js, client/src/js/workers/oidc-worker.js,
+%% api/source/service/utils.js:187-197, api/source/bootstrap/server.js:44-48
+flowchart TB
+  subgraph Browser["User browser"]
+    UI["ExtJS SPA<br/>client/src/js/init.js"]
+    W["OIDC web worker<br/>client/src/js/workers/oidc-worker.js<br/>Auth Code + PKCE (S256)<br/>tokens held in worker memory"]
+    UI --> W
+  end
+
+  subgraph IdP["OIDC provider (Keycloak or compatible)<br/>deployment-supplied"]
+    AUTHZ["/authorize<br/>/token (code, refresh_token,<br/>client_credentials)"]
+    JWKS["/certs (JWKS)"]
+    ENDS["/end_session"]
+  end
+
+  subgraph API["STIG Manager API (Node.js/Express, api/source)"]
+    RP["Reverse proxy / ingress<br/>(deployment-supplied; TLS, CAC/mTLS termination)<br/>docs/installation-and-setup/reverse-proxy.rst"]
+    VT["auth.validateToken<br/>auth.js:84-100<br/>decode, kid check, JWKS key, jwt.verify<br/>(aud only if STIGMAN_JWT_AUD_VALUE)"]
+    SU["auth.setupUser<br/>auth.js:103-158<br/>username claim precedence,<br/>first-login insert, admin/create_collection<br/>from realm_access.roles, elevate check"]
+    OV["express-openapi-validator<br/>middlewares.js:111<br/>scope check auth.validateOauthSecurity<br/>auth.js:161-185"]
+    CTL["Controllers / services<br/>collection grants + roles<br/>Collection.js:389-405"]
+    LOG["logger.js<br/>structured JSON to STDOUT<br/>request/transaction records"]
+    JC["jwksCache.js<br/>Map cache, refresh at 1/2 max age,<br/>refresh on unknown kid"]
+    RP --> VT --> SU --> OV --> CTL
+    VT --> JC
+    CTL --> LOG
+    VT --> LOG
+  end
+
+  subgraph DB["MySQL"]
+    UD["user_data<br/>(username unique key,<br/>lastClaims JSON)<br/>10-stigman-tables.sql:741-753"]
+    CG["collection_grant<br/>(userId | userGroupId, roleId)<br/>10-stigman-tables.sql:134-147"]
+  end
+
+  W -- "redirect: authorization request" --> AUTHZ
+  W -- "POST code + verifier / refresh_token" --> AUTHZ
+  W -- "logout redirect" --> ENDS
+  W -- "Bearer JWT" --> RP
+  JC -- "HTTPS GET JWKS (10 s timeout, optional CA)" --> JWKS
+  SU --> UD
+  CTL --> CG
+  CTL -- "TLS optional<br/>utils.js:187-197" --> DB
+  NPE["Non-person entity client<br/>(client_credentials)<br/>mapped to user_data by azp/client_id"] -- "Bearer JWT" --> RP
+  NPE --> AUTHZ
+  LOGSINK["Deployment log collection / SIEM<br/>(not provided by application)"]
+  LOG -. "STDOUT capture required<br/>docs/installation-and-setup/logging.rst" .-> LOGSINK
