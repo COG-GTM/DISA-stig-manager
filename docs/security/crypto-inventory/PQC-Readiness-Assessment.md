@@ -2,8 +2,8 @@
 
 **System:** STIG Manager (API, browser client, database schema, deployment assets in this repository)
 **Deliverable:** CDRL A009 — Cryptographic Inventory and PQC Readiness Assessment
-**Commit scanned:** `a60a688755640584254099a89a37b16c2c221feb`
-**Generated:** 2026-09-14T21:51:24+00:00 by `scripts/crypto_inventory.py`
+**Commit scanned:** `0ac904c6c01e2ab14e783ecfa03588c8531870d2`
+**Generated:** 2026-09-14T22:02:01+00:00 by `scripts/crypto_inventory.py`
 **Companion files:** `Cryptographic-Inventory.xlsx`, `crypto-inventory.json` (same directory)
 
 > NO production cryptographic service is introduced, replaced, disabled, or reconfigured by this work — recommendations only, pending Government authorization.
@@ -14,7 +14,7 @@ All counts and tables in this report are generated from `crypto-inventory.json` 
 
 STIG Manager is a web application that stores STIG evaluation results and POA&M-related data. It does not implement its own encryption of stored data. Its cryptography is concentrated in three places: (1) verification of OIDC access tokens signed by an external identity provider (IdP), (2) TLS for the API listener, the MySQL connection and the IdP connection, and (3) release signing in CI. Everything else is SHA-256 hashing for identifiers and content digests, and CSPRNG use in the browser.
 
-The scanner produced **144 inventory rows** from **365 files** using **51 detection rules**.
+The scanner produced **144 inventory rows** from **364 files** using **57 detection rules**.
 
 | Quantum-vulnerability class | Rows |
 |---|---|
@@ -59,7 +59,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `a60a688755640584254099a89a37b16c2c221feb` except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing.
+Scanned: every text file under the repository at commit `0ac904c6c01e2ab14e783ecfa03588c8531870d2` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
 
 Not scanned or out of scope:
 
@@ -76,6 +76,7 @@ Not scanned or out of scope:
 What it does:
 
 - Regex scan of text files (extensions: .bat, .cjs, .cnf, .conf, .csv, .env, .example, .html, .ini, .js, .json, .md, .mjs, .properties, .py, .rst, .sh, .sql, .toml, .ts, .txt, .yaml, .yml; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.
+- Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present.
 - Context window of ±12 lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options.
 - Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI.
 - Embedded certificates and public keys are parsed from PEM blocks, JWKS `x5c` arrays and TUF/Notary root metadata (root.json).
@@ -103,6 +104,7 @@ Priority scale: **1** act in Phase 1 or blocks later phases; **2** Phase 1/2 con
 - Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).
 - The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.
 - Occurrences of the same JWT literal pattern inside a single test file are collapsed to one row (first line, count in the rationale).
+- `commit_sha` is HEAD of the checkout at scan time and `source_tree_vs_commit` records whether the scanned source matched it. Because the generated artifacts are committed on top of that source, the SHA recorded inside an artifact is always the parent of the commit that adds the artifact, never that commit itself.
 
 ## 4. Cryptographic inventory summary
 
