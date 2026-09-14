@@ -151,6 +151,8 @@ CRYPTO_LIBRARIES = OrderedDict([
 METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
     "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next %d lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts." % (CALL_WINDOW - 1),
+    "Password hashing and KDF calls are matched as package calls or methods (bcrypt/bcryptjs/argon2 followed by any method such as hash, hashSync, compare, verify, including optional chaining), as node:crypto functions (pbkdf2/Sync, scrypt/Sync, hkdf/Sync) and as Web Crypto deriveBits/deriveKey/importKey with PBKDF2 or HKDF. Aliased imports (`const h = bcrypt.hash`, `import { hash } from 'bcrypt'`) are not followed.",
+    "Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %%, {, *, &, < or ( are treated as references or placeholders.",
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
     "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
     "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
@@ -159,7 +161,7 @@ METHOD_CHECKS = [
     "If `node` is on PATH, the local runtime is probed for Node/OpenSSL versions, default TLS versions and ML-KEM/ML-DSA availability. This describes the scanning host, not the deployed container.",
     "Secrets: only path, line and type are recorded; matched values are never written.",
     "Certificate subject/issuer: only attribute types and self-signed status are recorded unless --dn-values is given.",
-    "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found anywhere in scanned files, one row per absence is added and anchored to the TLS server setup line.",
+    "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it.",
 ]
 
 METHOD_LIMITS = [
@@ -185,6 +187,10 @@ METHOD_LIMITS = [
 # collapse_per_file (bool).
 
 RULES: list[dict] = []
+
+# Argument text up to an option of interest, allowing one level of nested
+# parentheses (e.g. `enc.encode(pw)`) inside the call being matched.
+_NESTED_ARGS = r"(?:[^()]|\([^()]*\))*?"
 
 
 def rule(**kw):
@@ -330,7 +336,9 @@ rule(
 
 rule(
     id="ASYM-WEBCRYPTO",
-    regex=r"subtle\.(generateKey|importKey|sign|verify|deriveBits|deriveKey|encrypt|decrypt)\([^)]*?name:\s*['\"](ECDSA|ECDH|Ed25519|X25519|RSA-PSS|RSASSA-PKCS1-v1_5|RSA-OAEP)['\"]",
+    # Argument list may contain one level of nested call, e.g. enc.encode(x).
+    regex=r"subtle\.(generateKey|importKey|sign|verify|deriveBits|deriveKey|encrypt|decrypt)\(" + _NESTED_ARGS + r"name:\s*['\"](ECDSA|ECDH|Ed25519|X25519|RSA-PSS|RSASSA-PKCS1-v1_5|RSA-OAEP)['\"]",
+    multiline=True,
     category="Asymmetric", algorithm="Web Crypto asymmetric operation", purpose="Browser-side public-key operation",
     library="Web Crypto (crypto.subtle)", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
     rationale="Public-key algorithm is a literal in browser code.",
@@ -389,6 +397,9 @@ rule(
 
 
 def _refine_jwt_verify(f, lines, idx, m):
+    if m.group(1):
+        f["library"] = "jose"
+        f["ext_dep"] = f["ext_dep"].replace("jsonwebtoken", "jose")
     ctx = _window(lines, idx, 6, 3)
     has_algs = re.search(r"\balgorithms\s*:", ctx) is not None
     has_aud = re.search(r"\baudience\s*:", ctx) is not None
@@ -397,7 +408,9 @@ def _refine_jwt_verify(f, lines, idx, m):
     if has_algs:
         parts.append("explicit `algorithms` allowlist present")
     else:
-        parts.append("no `algorithms` option: jsonwebtoken 9.x selects RS256/RS384/RS512/PS256/PS384/PS512 for RSA keys and ES256/ES384/ES512 for EC keys")
+        parts.append("no `algorithms` option: " + (
+            "jose accepts any JWS alg valid for the supplied key" if f["library"] == "jose"
+            else "jsonwebtoken 9.x selects RS256/RS384/RS512/PS256/PS384/PS512 for RSA keys and ES256/ES384/ES512 for EC keys"))
     parts.append("audience check: " + ("configurable via STIGMAN_JWT_AUD_VALUE" if has_aud else "absent"))
     parts.append("issuer check: " + ("present" if has_iss else "absent (trust is bound to the discovered JWKS)"))
     f["mode"] = "; ".join(parts)
@@ -408,7 +421,10 @@ def _refine_jwt_verify(f, lines, idx, m):
 
 rule(
     id="JWT-VERIFY",
-    regex=r"\bjwt\.verify\(|jsonwebtoken\.verify\(",
+    # jsonwebtoken (`jwt.verify(`, `jsonwebtoken.verify(`) and jose
+    # (`jwtVerify(`, `compactVerify(`, `flattenedVerify(`, `generalVerify(`,
+    # with or without a namespace such as `jose.`).
+    regex=r"\bjwt\.verify\(|jsonwebtoken\.verify\(|\b((?:jwt|compact|flattened|general)Verify)\s*\(",
     category="JWT/JWS/JWKS", algorithm="JWS signature verification (RS*/PS*/ES* per key type)", purpose="Verify bearer access tokens on API requests",
     library="jsonwebtoken", protocol="OAuth 2.0 bearer token (JWT)", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_LIB,
     ext_dep="Identity provider signing algorithm; jsonwebtoken algorithm support",
@@ -419,11 +435,12 @@ rule(
 
 rule(
     id="JWT-SIGN",
-    regex=r"\bjwt\.sign\(|jsonwebtoken\.sign\(",
+    regex=r"\bjwt\.sign\(|jsonwebtoken\.sign\(|\bnew\s+(SignJWT|CompactSign|FlattenedSign|GeneralSign)\s*\(",
     category="JWT/JWS/JWKS", algorithm="JWS signing", purpose="Issue signed test tokens (mock identity provider)",
     library="jsonwebtoken", protocol="JWT/JWS", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD,
     priority=3, rationale="Token issuance exists only in the test mock; production tokens are issued by the external IdP.",
     action="Track alongside JWT-VERIFY; no production change.", phase="Phase 3",
+    refine=lambda f, lines, idx, m: f.__setitem__("library", "jose") if m.group(1) else None,
 )
 
 rule(
@@ -591,12 +608,36 @@ rule(
     refine=lambda f, lines, idx, m: f.__setitem__("algorithm", "HMAC-" + m.group(1).upper()),
 )
 
+_KDF_LIBS = {"bcrypt": "bcrypt", "bcryptjs": "bcryptjs", "argon2": "argon2", "argon2id": "argon2", "argon2i": "argon2", "argon2d": "argon2"}
+
+
+def _refine_kdf(f, lines, idx, m):
+    """`bcrypt.hash(`, `argon2.verify(`, `crypto.pbkdf2Sync(`, `scrypt(` ...:
+    algorithm from the package or function name, method name in Mode."""
+    name, method = (m.group(1) or m.group(3)), m.group(2) or ""
+    f["algorithm"] = name
+    f["mode"] = method
+    f["library"] = _KDF_LIBS.get(name.lower(), "node:crypto")
+
+
 rule(
     id="KDF-PASSWORD",
-    regex=r"\b(bcrypt|argon2(?:id|i|d)?|pbkdf2(?:Sync)?|scrypt(?:Sync)?)\s*\(",
+    # Package call or method (`bcrypt.hash`, `bcryptjs.compareSync`,
+    # `argon2.verify`, optional chaining allowed) and node:crypto KDF
+    # functions (`crypto.pbkdf2Sync(`, `scrypt(`, `hkdf(`).
+    regex=r"\b(bcrypt(?:js)?|argon2(?:id|i|d)?)\b(?:\s*\??\.\s*(\w+))?\s*\(|\b(pbkdf2(?:Sync)?|scrypt(?:Sync)?|hkdf(?:Sync)?)\s*\(",
     category="KDF/Password", algorithm="Password hashing / KDF", purpose="Password storage or key derivation", library="",
     qclass=Q_GROVER, cnsa=CNSA_SYM, agility=AGILITY_HARD, priority=4, rationale="KDF literal in code.",
-    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", m.group(1)),
+    refine=_refine_kdf,
+)
+
+rule(
+    id="KDF-WEBCRYPTO",
+    regex=r"subtle\.(deriveBits|deriveKey|importKey)\(" + _NESTED_ARGS + r"name:\s*['\"](PBKDF2|HKDF)['\"]",
+    multiline=True,
+    category="KDF/Password", algorithm="Web Crypto KDF", purpose="Browser-side key derivation", library="Web Crypto (crypto.subtle)",
+    qclass=Q_GROVER, cnsa=CNSA_SYM, agility=AGILITY_HARD, priority=4, rationale="KDF algorithm is a literal in browser code.",
+    refine=lambda f, lines, idx, m: (f.__setitem__("algorithm", m.group(2)), f.__setitem__("mode", m.group(1))),
 )
 
 # ---- Symmetric ----------------------------------------------------------- #
@@ -1101,6 +1142,21 @@ rule(
 )
 
 rule(
+    id="SECRET-GENERIC-UNQUOTED",
+    # Unquoted scalar in dotenv / shell / YAML / properties / ini / compose /
+    # Dockerfile, up to whitespace, a comment or a separator. References
+    # (`$VAR`, `${VAR}`, `%VAR%`, `{{ var }}`, `*anchor`, `<placeholder>`)
+    # are not literals. Code files are excluded: an unquoted value there is
+    # an identifier, not a credential.
+    regex=r"(?i)\b(password|passwd|client_secret|api[_-]?key|secret_key|passphrase)\b\s*[:=]\s*(?![\"'$%{*&<(\[])[^\s#,;]{4,}",
+    category="Secret", algorithm="Credential literal", purpose="Credential literal (type from identifier name)", library="",
+    qclass=Q_NA, cnsa=CNSA_NONE, agility=AGILITY_HARD, priority=3, rationale="Literal credential assignment (unquoted scalar).",
+    evidence="label", label="[redacted] credential literal",
+    file_re=r"(?i)(?:\.(?:env|example|ya?ml|sh|bat|properties|ini|conf|cnf|toml)$|(?:^|/)(?:\.env[^/]*|Dockerfile[^/]*)$)",
+    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", "Credential literal (%s)" % m.group(1).lower()),
+)
+
+rule(
     id="SECRET-JWT-LITERAL",
     regex=r"eyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}",
     category="Secret", algorithm="JWT literal", purpose="Embedded signed token (type: bearer token fixture)", library="",
@@ -1342,6 +1398,9 @@ def parse_public_key_b64(b64: str, is_x509: bool) -> dict:
 # --------------------------------------------------------------------------- #
 # Scanner
 # --------------------------------------------------------------------------- #
+
+ABSENCE_SCOPES = {"API (server)", "Client (browser)", "Repository"}
+
 
 def scope_for(rel: str) -> str:
     if rel.startswith("test/") or "/test/" in rel or rel.endswith(".test.js"):
@@ -1705,13 +1764,16 @@ console.log(JSON.stringify(out));
         anchor = next((f for f in self.findings if f["rule"] == "TLS-SERVER"), None)
         if not anchor:
             return
-        matched = {f["rule"] for f in self.findings}
+        # Only deployable code and configuration count as "present": prose in
+        # docs, test fixtures and CI workflows describing a control does not
+        # make the application send the header or set the option.
+        matched = {f["rule"] for f in self.findings if f["scope"] in ABSENCE_SCOPES}
         absences = [
             ("TLS-HSTS", "ABSENT-HSTS", "HSTS header (not configured)",
-             "No Strict-Transport-Security header or helmet() use in application code; browsers are not instructed to require HTTPS by the API itself.",
+             "No Strict-Transport-Security header or helmet() use in application code or deployable configuration (documentation, tests and CI excluded); browsers are not instructed to require HTTPS by the API itself.",
              "Reverse proxy / ingress must set HSTS", 3, "Set HSTS at the TLS terminator; document it as a deployment control."),
             ("TLS-OPTIONS-LITERAL", "ABSENT-TLS-OPTIONS", "Explicit TLS options (none set)",
-             "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal anywhere in scanned files. Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
+             "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal in application code or deployable configuration (documentation, tests and CI excluded). Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
              "Node.js/OpenSSL build defaults in the container image", 2, "Add configuration for a TLS 1.2 floor / TLS 1.3 preference and an approved cipher policy; verify hybrid ML-KEM group availability in the deployed image."),
         ]
         for src_rule, rule_id, algorithm, mode, ext_dep, prio, action in absences:
@@ -1719,11 +1781,11 @@ console.log(JSON.stringify(out));
                 continue
             self.findings.append({
                 "asset_id": "", "file": anchor["file"], "line": anchor["line"], "scope": anchor["scope"], "category": "TLS",
-                "algorithm": algorithm, "key_size": "", "mode": mode, "purpose": "Absence check across all scanned files",
+                "algorithm": algorithm, "key_size": "", "mode": mode, "purpose": "Absence check across application code and deployable configuration",
                 "library": "node:tls", "protocol": "TLS", "security_relevant": "Yes", "qclass": Q_PROTO, "cnsa": CNSA_TLS,
                 "agility": AGILITY_LIB, "ext_dep": ext_dep, "priority": prio,
                 "rationale": "Absence recorded so the control can be assigned to the deployment layer or added as configuration.",
-                "action": action, "phase": "Phase 1", "gap": mode, "evidence": "pattern not found in any scanned file", "rule": rule_id, "_count": 1,
+                "action": action, "phase": "Phase 1", "gap": mode, "evidence": "pattern not found in any API, client or repository-level file", "rule": rule_id, "_count": 1,
             })
 
     # -- finalize -----------------------------------------------------------
