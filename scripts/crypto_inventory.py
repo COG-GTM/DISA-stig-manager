@@ -85,6 +85,8 @@ SKIP_FILE_RES = [re.compile(p) for p in (
 LOCKFILE_NAMES = {"package-lock.json", "npm-shrinkwrap.json"}
 CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key", ".der", ".p12", ".pfx", ".jks", ".csr"}
 MAX_TEXT_BYTES = 2 * 1024 * 1024
+CALL_WINDOW = 4  # lines a multi-line call may span, including its first line
+PEM_MAX_LINES = 400  # upper bound on the lines one PEM block may span
 
 WINDOW = 12  # lines of context inspected before/after a match
 
@@ -148,10 +150,10 @@ CRYPTO_LIBRARIES = OrderedDict([
 
 METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
-    "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present.",
+    "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next %d lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts." % (CALL_WINDOW - 1),
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
     "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Encrypted keys, binary keystores and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
-    "Embedded certificates and public keys are parsed from PEM blocks, JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
+    "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
     "package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.",
     "Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.",
     "If `node` is on PATH, the local runtime is probed for Node/OpenSSL versions, default TLS versions and ML-KEM/ML-DSA availability. This describes the scanning host, not the deployed container.",
@@ -164,8 +166,8 @@ METHOD_LIMITS = [
     "Static text matching only. Dynamic algorithm selection (for example the algorithm list jsonwebtoken derives from the key type) is inferred from library source knowledge, not observed at runtime.",
     "Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.",
     "TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.",
-    "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its output directory (the canonical docs/security/crypto-inventory and any in-repository --out path) are not pattern-scanned.",
-    "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed.",
+    "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its own output (the canonical docs/security/crypto-inventory directory, any in-repository --out directory, and the concrete JSON/XLSX/report/template output paths, so that `--out .` does not inventory the previous run) are not pattern-scanned.",
+    "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. A PEM block may span at most %d lines; longer blocks are recorded as not parsed. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed." % PEM_MAX_LINES,
     "Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.",
     "Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).",
     "The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.",
@@ -196,6 +198,10 @@ def rule(**kw):
     kw.setdefault("action", "")
     kw.setdefault("phase", "")
     kw.setdefault("gap", "")
+    # A call whose argument list may continue on the next line (`name(` then
+    # whitespace, `{`, or a `[^)]` run) is matched against a short multi-line
+    # window rather than a single physical line.
+    kw.setdefault("multiline", bool(re.search(r"\\\((?:\\s\*|\\\{|\[\^\)\])", kw["regex"])))
     kw["regex"] = re.compile(kw["regex"])
     if "file_re" in kw:
         kw["file_re"] = re.compile(kw["file_re"])
@@ -974,12 +980,51 @@ rule(
     collapse_per_file=True,
 )
 
+
+def _refine_pem_block(f, lines, idx, m):
+    """Parse the PEM block that starts at this match and classify the row by
+    the parsed strength. Public parameters only are recorded; the parsed
+    metadata is also handed to the scanner (``_pem_info``) for the certificate
+    table when the block is embedded in a non-certificate file."""
+    kind = re.match(r"-----BEGIN ([A-Z ]+)-----", m.group(0)).group(1)
+    text = lines[idx][m.start():] + "\n" + "\n".join(lines[idx + 1:idx + PEM_MAX_LINES])
+    bm = _PEM_BLOCK_RE.match(text)
+    info = parse_pem_block(kind, bm.group(2)) if bm else {"parser": "none", "error": f"no matching END marker within {PEM_MAX_LINES} lines"}
+    f["_pem_info"] = {"source": f"PEM {kind} (embedded)", **info}
+    if info.get("error"):
+        f["mode"] = f"not parsed: {info['error']}"
+        f["rationale"] += " Key strength not parsed; classified by block type only."
+        return
+    alg, size = info.get("key_algorithm", ""), info.get("key_size", "")
+    if alg:
+        f["algorithm"] += f" ({alg})"
+    f["key_size"] = size
+    sig = info.get("signature_algorithm", "")
+    if sig:
+        f["mode"] = f"signature {sig}; valid {info.get('not_before')} to {info.get('not_after')}"
+    bits = re.fullmatch(r"(?:RSA|DSA)-(\d+)", size)
+    if bits and int(bits.group(1)) < 2048:
+        f["qclass"] = Q_WEAK
+        f["rationale"] = f"{size} is below the SP 800-131A Rev. 2 floor. " + f["rationale"]
+    elif re.search(r"(?i)sha1|md5|md2", sig):
+        f["qclass"] = Q_WEAK
+        f["rationale"] = f"Certificate signature {sig} uses a deprecated hash. " + f["rationale"]
+
+
 rule(
     id="KEYMAT-PEM-PRIVATE",
     regex=r"-----BEGIN (?:RSA |EC |ENCRYPTED |OPENSSH )?PRIVATE KEY-----",
     category="Secret", algorithm="PEM private key", purpose="Embedded private key", library="",
     qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=1, rationale="Private key material committed to the repository.",
-    evidence="label", label="[redacted] PEM private key block",
+    evidence="label", label="[redacted] PEM private key block", refine=_refine_pem_block,
+)
+
+rule(
+    id="KEYMAT-PEM-PUBLIC",
+    regex=r"-----BEGIN (?:RSA )?PUBLIC KEY-----",
+    category="Certificate/Key material", algorithm="PEM public key", purpose="Embedded public key", library="",
+    qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3, rationale="Public key committed to the repository.",
+    evidence="label", label="PEM public key block", refine=_refine_pem_block,
 )
 
 rule(
@@ -987,7 +1032,7 @@ rule(
     regex=r"-----BEGIN CERTIFICATE-----",
     category="Certificate/Key material", algorithm="X.509 certificate (PEM)", purpose="Embedded certificate", library="",
     qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3, rationale="Certificate committed to the repository.",
-    evidence="label", label="PEM certificate block",
+    evidence="label", label="PEM certificate block", refine=_refine_pem_block,
 )
 
 # ---- Secrets (type + location only) ------------------------------------- #
@@ -1168,9 +1213,35 @@ def parse_certificate_der(der: bytes) -> dict:
             info["subject"] = _dn_summary(text=subj, other=iss)
             info["issuer"] = _dn_summary(text=iss, other=subj)
             return info
+        except subprocess.CalledProcessError as e:
+            err = f"openssl x509 could not decode the certificate (exit {e.returncode})"
         except Exception as e:  # noqa: BLE001
             err = str(e)
     return {"parser": "none", "error": err}
+
+
+_PEM_BLOCK_RE = re.compile(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", re.S)
+
+
+def parse_pem_block(kind: str, body: str) -> dict:
+    """Metadata for one PEM block. Certificates yield subject/issuer/algorithms/
+    validity; public and unencrypted private keys yield algorithm and size only.
+    Encrypted keys and unknown block types are recorded as not parsed. The body
+    may come from source text (quoted, `\\n`-escaped, concatenated), so only the
+    base64 alphabet is kept."""
+    if kind == "ENCRYPTED PRIVATE KEY" or "Proc-Type: 4,ENCRYPTED" in body:
+        return {"parser": "none", "error": "encrypted private key; not parsed (passphrase required)", "key_algorithm": kind}
+    b64 = re.sub(r"[^A-Za-z0-9+/=]", "", re.sub(r"\\[nrt]", "", body))
+    if kind == "CERTIFICATE":
+        try:
+            return parse_certificate_der(base64.b64decode(b64, validate=True))
+        except Exception as ex:  # noqa: BLE001
+            return {"parser": "none", "error": f"malformed PEM certificate block: {ex}"}
+    if "PRIVATE KEY" in kind or "PUBLIC KEY" in kind:
+        wrapped = "\n".join(b64[i:i + 64] for i in range(0, len(b64), 64))
+        pem = f"-----BEGIN {kind}-----\n{wrapped}\n-----END {kind}-----\n".encode()
+        return parse_pem_key(pem, private="PRIVATE" in kind)
+    return {"parser": "none", "error": f"{kind} block not parsed"}
 
 
 def parse_public_key_b64(b64: str, is_x509: bool) -> dict:
@@ -1220,8 +1291,9 @@ def scope_for(rel: str) -> str:
     return "Repository"
 
 
-def iter_files(repo: Path, extra_exclude_dirs: set[str] = frozenset()):
+def iter_files(repo: Path, extra_exclude_dirs: set[str] = frozenset(), extra_exclude_files: set[str] = frozenset()):
     exclude_paths = EXCLUDE_DIR_PATHS | set(extra_exclude_dirs)
+    exclude_files = EXCLUDE_FILE_PATHS | set(extra_exclude_files)
     for root, dirs, files in os.walk(repo):
         rel_root = Path(root).relative_to(repo).as_posix()
         dirs[:] = sorted(d for d in dirs if d not in EXCLUDE_DIR_NAMES
@@ -1229,7 +1301,7 @@ def iter_files(repo: Path, extra_exclude_dirs: set[str] = frozenset()):
         for name in sorted(files):
             p = Path(root) / name
             rel = p.relative_to(repo).as_posix()
-            if rel in EXCLUDE_FILE_PATHS:
+            if rel in exclude_files:
                 continue
             yield p, rel
 
@@ -1257,15 +1329,24 @@ def read_text(p: Path):
 
 
 class Scanner:
-    def __init__(self, repo: Path, lts_resolves_to: str | None, probe_node: bool, out_dir: Path | None = None):
+    def __init__(self, repo: Path, lts_resolves_to: str | None, probe_node: bool, out_dir: Path | None = None,
+                 out_files: tuple[Path, ...] = ()):
         self.repo = repo
         self.lts_resolves_to = lts_resolves_to
         self.probe_node = probe_node
+        # Generated artifacts inside the repository are never scanned: the
+        # output directory as a whole when it is a subdirectory, and the
+        # concrete output files always (the directory cannot be excluded when
+        # it is the repository root itself).
         self.extra_exclude_dirs: set[str] = set()
+        self.extra_exclude_files: set[str] = set()
         if out_dir is not None and out_dir.resolve().is_relative_to(repo):
             rel_out = out_dir.resolve().relative_to(repo).as_posix()
             if rel_out != ".":
                 self.extra_exclude_dirs.add(rel_out)
+        for f in out_files:
+            if f.resolve().is_relative_to(repo):
+                self.extra_exclude_files.add(f.resolve().relative_to(repo).as_posix())
         self.findings: list[dict] = []
         self.certificates: list[dict] = []
         self.libraries: list[dict] = []
@@ -1277,7 +1358,7 @@ class Scanner:
 
     # -- main ---------------------------------------------------------------
     def run(self):
-        for p, rel in iter_files(self.repo, self.extra_exclude_dirs):
+        for p, rel in iter_files(self.repo, self.extra_exclude_dirs, self.extra_exclude_files):
             if p.name in LOCKFILE_NAMES:
                 self.lockfiles.append(rel)
                 continue
@@ -1315,11 +1396,20 @@ class Scanner:
             for idx, line in enumerate(lines):
                 if "not_file_re" in r and r["not_file_re"].search(line):
                     continue
+                # Call rules see this line plus the next few, so an argument on
+                # the following line still matches; only matches that start on
+                # this line are kept so each call is inventoried once.
+                target = "\n".join(lines[idx:idx + CALL_WINDOW]) if r["multiline"] else line
                 # finditer: minified JSON/YAML can hold several assets on one line.
-                for m in r["regex"].finditer(line):
+                for m in r["regex"].finditer(target):
+                    if m.start() > len(line):
+                        break
                     f = self.new_finding(r, rel, idx + 1, m, scope)
                     if r.get("refine") and r["refine"](f, lines, idx, m) is False:
                         continue
+                    pem_info = f.pop("_pem_info", None)
+                    if pem_info is not None and Path(rel).suffix.lower() not in CERT_EXTENSIONS:
+                        self.certificates.append({"file": rel, "line": idx + 1, "scope": scope, **pem_info})
                     if r.get("collapse_per_file"):
                         key = f"{r['id']}|{f['purpose']}"
                         if key in seen_collapse:
@@ -1332,7 +1422,7 @@ class Scanner:
                 f["rationale"] += f" {f['_count']} occurrences in this file; first occurrence listed."
 
     def new_finding(self, r: dict, rel: str, line: int, m, scope: str) -> dict:
-        evidence = r["label"] if r["evidence"] == "label" else m.group(0)[:90]
+        evidence = r["label"] if r["evidence"] == "label" else " ".join(m.group(0).split())[:90]
         f = {
             "asset_id": "",
             "file": rel,
@@ -1423,8 +1513,7 @@ class Scanner:
             self.certificates.append(entry)
             return None
         text = data.decode("utf-8", errors="replace")
-        blocks = [(m.group(1), m.group(2), text.count("\n", 0, m.start()) + 1)
-                  for m in re.finditer(r"-----BEGIN ([A-Z ]+)-----(.*?)-----END \1-----", text, re.S)]
+        blocks = [(m.group(1), m.group(2), text.count("\n", 0, m.start()) + 1) for m in _PEM_BLOCK_RE.finditer(text)]
         if not blocks:
             try:
                 info = parse_certificate_der(data)
@@ -1437,18 +1526,7 @@ class Scanner:
             e = dict(entry)
             e["line"] = line
             e["source"] = f"PEM {kind}"
-            if kind == "CERTIFICATE":
-                try:
-                    e.update(parse_certificate_der(base64.b64decode(re.sub(r"\s+", "", body), validate=True)))
-                except Exception as ex:  # noqa: BLE001
-                    e.update({"parser": "none", "error": f"malformed PEM certificate block: {ex}"})
-            elif kind == "ENCRYPTED PRIVATE KEY" or "Proc-Type: 4,ENCRYPTED" in body:
-                e.update({"parser": "none", "error": "encrypted private key; not parsed (passphrase required)", "key_algorithm": kind})
-            elif "PRIVATE KEY" in kind or "PUBLIC KEY" in kind:
-                pem = f"-----BEGIN {kind}-----{body}-----END {kind}-----".encode()
-                e.update(parse_pem_key(pem, private="PRIVATE" in kind))
-            else:
-                e.update({"parser": "none", "error": f"{kind} block not parsed"})
+            e.update(parse_pem_block(kind, body))
             self.certificates.append(e)
         return text
 
@@ -1666,10 +1744,10 @@ def git_commit(repo: Path) -> str:
         return "unknown"
 
 
-def git_tree_state(repo: Path, ignore_dirs: set[str]) -> str:
-    """Whether the scanned source matches HEAD. The output directory is ignored
-    because the artifacts themselves are always newer than the commit they
-    record: they are committed on top of the SHA they were generated from."""
+def git_tree_state(repo: Path, ignore_dirs: set[str], ignore_files: set[str] = frozenset()) -> str:
+    """Whether the scanned source matches HEAD. The output artifacts are ignored
+    because they are always newer than the commit they record: they are
+    committed on top of the SHA they were generated from."""
     try:
         out = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
                              capture_output=True, text=True, check=True).stdout
@@ -1677,6 +1755,7 @@ def git_tree_state(repo: Path, ignore_dirs: set[str]) -> str:
         return "unknown (git status unavailable)"
     ignored = {"docs/security/crypto-inventory"} | set(ignore_dirs)
     changed = [ln[3:] for ln in out.splitlines() if ln.strip()
+               and ln[3:] not in ignore_files
                and not any(ln[3:].startswith(d + "/") for d in ignored)
                and not EXCLUDE_DIR_NAMES.intersection(ln[3:].split("/")[:-1])]
     return "clean: scanned source equals HEAD" if not changed else f"modified: {len(changed)} source path(s) differ from HEAD"
@@ -1685,12 +1764,13 @@ def git_tree_state(repo: Path, ignore_dirs: set[str]) -> str:
 def build_document(scanner: Scanner, repo: Path) -> dict:
     generated = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
     commit = git_commit(repo)
-    tree_state = git_tree_state(repo, scanner.extra_exclude_dirs)
+    tree_state = git_tree_state(repo, scanner.extra_exclude_dirs, scanner.extra_exclude_files)
     return OrderedDict([
         ("schema_version", "1.0"),
         ("summary", scanner.summary(commit, generated, tree_state)),
         ("method", {"checks": METHOD_CHECKS, "limits": METHOD_LIMITS,
                     "excluded_dirs": sorted(EXCLUDE_DIR_NAMES | EXCLUDE_DIR_PATHS | scanner.extra_exclude_dirs),
+                    "excluded_files": sorted(EXCLUDE_FILE_PATHS | scanner.extra_exclude_files),
                     "parsers": {"cryptography": HAVE_CRYPTOGRAPHY, "openssl_cli": HAVE_OPENSSL_CLI}}),
         ("runtime", scanner.runtime),
         ("libraries", scanner.libraries),
@@ -1973,7 +2053,9 @@ def main(argv=None):
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
 
-    scanner = Scanner(repo, args.lts_resolves_to, probe_node=not args.no_probe, out_dir=out)
+    template = Path(args.report_template).resolve() if args.report_template else out / "PQC-Readiness-Assessment.template.md"
+    out_files = (out / args.json_name, out / args.xlsx_name, out / args.report_name, template)
+    scanner = Scanner(repo, args.lts_resolves_to, probe_node=not args.no_probe, out_dir=out, out_files=out_files)
     scanner.run()
     doc = build_document(scanner, repo)
 
@@ -1986,7 +2068,6 @@ def main(argv=None):
         if write_xlsx(doc, xlsx_path):
             print(f"wrote {xlsx_path}")
 
-    template = Path(args.report_template) if args.report_template else out / "PQC-Readiness-Assessment.template.md"
     if template.exists():
         render_report(doc, template, out / args.report_name)
         print(f"wrote {out / args.report_name}")
