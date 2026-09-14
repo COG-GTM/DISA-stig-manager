@@ -153,6 +153,7 @@ METHOD_CHECKS = [
     "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next %d lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts." % (CALL_WINDOW - 1),
     "Password hashing and KDF calls are matched as package calls or methods (bcrypt/bcryptjs/argon2 followed by any method such as hash, hashSync, compare, verify, including optional chaining), as node:crypto functions (pbkdf2/Sync, scrypt/Sync, hkdf/Sync) and as Web Crypto deriveBits/deriveKey/importKey with PBKDF2 or HKDF. Aliased imports (`const h = bcrypt.hash`, `import { hash } from 'bcrypt'`) are not followed.",
     "Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %, {, *, &, < or ( are treated as references or placeholders.",
+    "Literal values decide the weak class, not only the option or API name: minVersion/maxVersion/secureProtocol below TLS 1.2 (SSLv2, SSLv3, TLSv1, TLSv1.1 and the *_method constants), cipher lists that enable RC4, DES/3DES, NULL, export or MD5 suites, createSign/createVerify/crypto.sign/verify and Web Crypto `hash:` parameters naming MD5 or SHA-1, createHmac('md5'), and createCipheriv names for DES, RC2, RC4, Blowfish, IDEA, SEED or CAST are classified `Deprecated/weak regardless of PQC` at priority 1. `rejectUnauthorized: false` keeps the protocol class but is raised to priority 1 with a stated gap. HMAC-SHA-1 stays in the Grover class (acceptable under SP 800-131A Rev. 2). JWK fields are matched in both JavaScript (`d: '...'`) and JSON (`\"d\": \"...\"`) spelling.",
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
     "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
     "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
@@ -161,7 +162,7 @@ METHOD_CHECKS = [
     "If `node` is on PATH, the local runtime is probed for Node/OpenSSL versions, default TLS versions and ML-KEM/ML-DSA availability. This describes the scanning host, not the deployed container.",
     "Secrets: only path, line and type are recorded; matched values are never written.",
     "Certificate subject/issuer: only attribute types and self-signed status are recorded unless --dn-values is given.",
-    "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it.",
+    "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, secureProtocol, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it.",
 ]
 
 METHOD_LIMITS = [
@@ -227,8 +228,43 @@ def _window(lines, idx, before=WINDOW, after=WINDOW):
     return "\n".join(lines[lo:hi])
 
 
+def _jkey(name):
+    """Object key as written in a JS literal (`n:`) or in JSON (`"n":`)."""
+    return r"['\"]?\b" + name + r"['\"]?\s*:"
+
+
+_WEAK_HASH_RE = re.compile(r"(?i)(?<![0-9A-Z])(?:MD5|MD4|SHA-?1)(?![0-9])")
+
+
+def _flag_weak_hash(f, token, what):
+    """MD5/SHA-1 inside a signature or digest algorithm name: deprecated
+    regardless of PQC, priority 1."""
+    if token and _WEAK_HASH_RE.search(token):
+        f["qclass"] = Q_WEAK
+        f["priority"] = 1
+        f["rationale"] = "%s uses %s, which is disallowed for digital signatures (SP 800-131A Rev. 2). " % (what, token) + f["rationale"]
+        return True
+    return False
+
+
+def _call_args(lines, idx, start):
+    """Text of the call that opens at lines[idx][start:], from its first `(`
+    to the matching `)`, read across at most CALL_WINDOW lines. Returns the
+    whole window when the call does not close inside it."""
+    text = "\n".join([lines[idx][start:]] + lines[idx + 1:idx + CALL_WINDOW])
+    depth = 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return text[:i + 1]
+    return text
+
+
 def _jwk_n_bits(text):
-    m = re.search(r"\bn:\s*['\"]([A-Za-z0-9_\-]+)['\"]", text)
+    m = re.search(_jkey("n") + r"\s*['\"]([A-Za-z0-9_\-]+)['\"]", text)
     if not m:
         return None
     n = m.group(1)
@@ -324,15 +360,35 @@ rule(
     action="Replace with ML-KEM (FIPS 203) or a hybrid construction.", phase="Phase 2",
 )
 
+def _refine_sign_verify(f, lines, idx, m):
+    """`createSign('RSA-SHA256')`, `createVerify('sha1')`, `crypto.sign('sha256', ...)`:
+    the digest named in the literal decides the weak class."""
+    alg = m.group(1) or m.group(2) or m.group(4) or ""
+    f["mode"] = alg.upper()
+    _flag_weak_hash(f, alg, "Signature algorithm")
+
+
 rule(
     id="ASYM-SIGN-VERIFY",
-    regex=r"createSign\(\s*['\"]([\w-]+)['\"]|createVerify\(\s*['\"]([\w-]+)['\"]|\bcrypto\.(sign|verify)\(",
+    regex=r"createSign\(\s*['\"]([\w-]+)['\"]|createVerify\(\s*['\"]([\w-]+)['\"]|\bcrypto\.(sign|verify)\(\s*(?:['\"]([\w-]+)['\"])?",
     category="Asymmetric", algorithm="Digital signature (algorithm follows key type)", purpose="Signature generation or verification",
     library="node:crypto", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
     rationale="Signature operation whose algorithm is set by the supplied key; RSA/ECDSA/EdDSA keys are quantum-vulnerable.",
-    refine=lambda f, lines, idx, m: f.__setitem__("mode", (m.group(1) or m.group(2) or "").upper()),
+    refine=_refine_sign_verify,
     action="Plan ML-DSA (FIPS 204) keys once Node exposes them for this API.", phase="Phase 3",
 )
+
+def _refine_webcrypto_asym(f, lines, idx, m):
+    f["algorithm"] = m.group(2)
+    f["mode"] = m.group(1)
+    f["cnsa"] = CNSA_KEM if m.group(2) in ("ECDH", "X25519", "RSA-OAEP") else CNSA_SIG
+    # `hash: 'SHA-1'` / `hash: { name: 'SHA-1' }` in this call's argument list.
+    ctx = _call_args(lines, idx, m.start())
+    hm = re.search(r"\bhash:\s*(?:\{\s*name:\s*)?['\"]([\w-]+)['\"]", ctx)
+    if hm:
+        f["mode"] += " / " + hm.group(1)
+        _flag_weak_hash(f, hm.group(1), "Signature digest")
+
 
 rule(
     id="ASYM-WEBCRYPTO",
@@ -342,23 +398,22 @@ rule(
     category="Asymmetric", algorithm="Web Crypto asymmetric operation", purpose="Browser-side public-key operation",
     library="Web Crypto (crypto.subtle)", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
     rationale="Public-key algorithm is a literal in browser code.",
-    refine=lambda f, lines, idx, m: (f.__setitem__("algorithm", m.group(2)), f.__setitem__("mode", m.group(1)),
-                                     f.__setitem__("cnsa", CNSA_KEM if m.group(2) in ("ECDH", "X25519", "RSA-OAEP") else CNSA_SIG)),
+    refine=_refine_webcrypto_asym,
 )
 
 
 def _refine_jwk_private(f, lines, idx, m):
     ctx = _window(lines, idx, 2, 14)
-    if re.search(r"kty:\s*['\"]RSA['\"]", ctx):
+    if re.search(_jkey("kty") + r"\s*['\"]RSA['\"]", ctx):
         f["algorithm"] = "RSA"
         bits = _jwk_n_bits(ctx)
         if bits:
             f["key_size"] = f"RSA-{bits}"
             if bits < 2048:
                 f["qclass"] = Q_WEAK
-    elif re.search(r"kty:\s*['\"]EC['\"]", ctx):
+    elif re.search(_jkey("kty") + r"\s*['\"]EC['\"]", ctx):
         f["algorithm"] = "ECDSA"
-        cm = re.search(r"crv:\s*['\"]([\w-]+)['\"]", ctx)
+        cm = re.search(_jkey("crv") + r"\s*['\"]([\w-]+)['\"]", ctx)
         if cm:
             f["key_size"] = cm.group(1)
 
@@ -600,12 +655,22 @@ def _set_hash_alg(f, name):
         f["rationale"] = f"{n} is disallowed for digital signatures and deprecated for other integrity uses (SP 800-131A Rev. 2). " + f["rationale"]
 
 
+def _refine_hmac(f, lines, idx, m):
+    f["algorithm"] = "HMAC-" + m.group(1).upper()
+    # HMAC-SHA-1 remains acceptable under SP 800-131A Rev. 2; MD5 does not.
+    if re.fullmatch(r"(?i)md[45]", m.group(1)):
+        f["qclass"] = Q_WEAK
+        f["cnsa"] = CNSA_REMOVE
+        f["priority"] = 1
+        f["rationale"] = "%s is deprecated for message authentication (SP 800-131A Rev. 2). " % f["algorithm"] + f["rationale"]
+
+
 rule(
     id="HASH-HMAC",
-    regex=r"createHmac\(\s*['\"](\w+)['\"]",
+    regex=r"createHmac\(\s*['\"]([\w-]+)['\"]",
     category="Symmetric", algorithm="HMAC", purpose="Message authentication", library="node:crypto",
     qclass=Q_GROVER, cnsa=CNSA_HASH, agility=AGILITY_HARD, priority=4, rationale="HMAC literal in code.",
-    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", "HMAC-" + m.group(1).upper()),
+    refine=_refine_hmac,
 )
 
 _KDF_LIBS = {"bcrypt": "bcrypt", "bcryptjs": "bcryptjs", "argon2": "argon2", "argon2id": "argon2", "argon2i": "argon2", "argon2d": "argon2"}
@@ -652,6 +717,15 @@ def _classify_symmetric(f, tok):
         f["qclass"] = Q_WEAK
         f["cnsa"] = CNSA_SYM
         f["priority"] = 1
+    elif re.match(r"(?:DES|RC[24]|BF|BLOWFISH|IDEA|SEED|CAST5?|SM4|NULL)\b", tok):
+        f["algorithm"] = tok.split("-")[0]
+        f["qclass"] = Q_WEAK
+        f["cnsa"] = CNSA_SYM
+        f["priority"] = 1
+        f["rationale"] = "%s is not an approved cipher (SP 800-131A Rev. 2). " % f["algorithm"] + f["rationale"]
+    elif "AES" not in tok and "ID-AES" not in tok:
+        f["algorithm"] = tok
+        f["rationale"] = "Cipher name is not in the scanner's table; classify by hand. " + f["rationale"]
     else:
         f["algorithm"] = "AES"
         km = re.search(r"(128|192|256)", tok)
@@ -866,12 +940,45 @@ rule(
     qclass=Q_PROTO, cnsa=CNSA_TLS, agility=AGILITY_CONFIG, priority=3, rationale="HSTS setting found.",
 )
 
+_TLS_OBSOLETE_VERSIONS = re.compile(r"(?i)^(?:SSLv[23]|TLSv1(?:\.[01])?|TLSv1(?:_[01])?_method|SSLv[23]_method)$")
+_WEAK_CIPHER_TOKEN = re.compile(r"(?i)(?:^|[-_])(?:RC4|RC2|DES|3DES|DES-CBC3|NULL|EXP(?:ORT)?\d*|MD5|IDEA|SEED|aNULL|eNULL)(?:$|[-_])")
+
+
+def _refine_tls_option(f, lines, idx, m):
+    """Read the option value on the call line (and the next line) and classify
+    it: obsolete protocol versions and weak cipher tokens are deprecated
+    regardless of PQC; disabled certificate verification is priority 1."""
+    name = m.group(1)
+    f["algorithm"] = name
+    rest = (lines[idx][m.end():] + "\n" + "\n".join(lines[idx + 1:idx + 2])).lstrip()
+    vm = re.match(r"['\"]([^'\"]*)['\"]|(true|false)\b", rest)
+    if not vm:
+        return
+    value = vm.group(1) if vm.group(1) is not None else vm.group(2)
+    f["mode"] = value
+    if name in ("minVersion", "maxVersion", "secureProtocol"):
+        if _TLS_OBSOLETE_VERSIONS.match(value):
+            f["qclass"] = Q_WEAK
+            f["priority"] = 1
+            f["rationale"] = "%s permits %s; TLS below 1.2 and all SSL versions are disallowed (SP 800-52 Rev. 2). " % (name, value) + f["rationale"]
+    elif name == "ciphers":
+        weak = [t for t in value.split(":") if t and t[0] not in "!-" and _WEAK_CIPHER_TOKEN.search(t)]
+        if weak:
+            f["qclass"] = Q_WEAK
+            f["priority"] = 1
+            f["rationale"] = "Cipher list enables %s (SP 800-52 Rev. 2 disallows RC4, DES/3DES, NULL, export and MD5 suites). " % ", ".join(weak) + f["rationale"]
+    elif name == "rejectUnauthorized" and value == "false":
+        f["priority"] = 1
+        f["gap"] = "Peer certificate verification is disabled at this call site."
+        f["rationale"] = "rejectUnauthorized: false accepts any peer certificate; authentication of the TLS peer is lost. " + f["rationale"]
+
+
 rule(
     id="TLS-OPTIONS-LITERAL",
-    regex=r"\b(minVersion|maxVersion|ciphers|rejectUnauthorized|secureOptions|honorCipherOrder|ecdhCurve)\s*:",
+    regex=r"\b(minVersion|maxVersion|secureProtocol|ciphers|rejectUnauthorized|secureOptions|honorCipherOrder|ecdhCurve)\s*:",
     category="TLS", algorithm="Explicit TLS option", purpose="TLS version/cipher/verification option set in code", library="node:tls",
     protocol="TLS", qclass=Q_PROTO, cnsa=CNSA_TLS, agility=AGILITY_HARD, priority=2, rationale="Explicit TLS option literal.",
-    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", m.group(1)),
+    refine=_refine_tls_option,
 )
 
 # ---- Signing of releases / trust metadata ------------------------------- #
@@ -1167,7 +1274,8 @@ rule(
 
 rule(
     id="SECRET-JWK-PRIVATE",
-    regex=r"\bd:\s*['\"][A-Za-z0-9_\-]{40,}['\"]",
+    # JS object literal (`d: '...'`) or JSON (`"d": "..."`, minified `"d":"..."`).
+    regex=_jkey("d") + r"\s*['\"][A-Za-z0-9_\-]{40,}['\"]",
     category="Secret", algorithm="Private key (JWK private exponent)", purpose="Embedded RSA private key component (type: JWK private key)", library="",
     qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3,
     rationale="Reproduces a public, known-insecure IdP key for negative tests; the kid is on the application denylist.",
