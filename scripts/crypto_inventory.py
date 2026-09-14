@@ -150,7 +150,7 @@ METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
     "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present.",
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
-    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI." % ", ".join(sorted(CERT_EXTENSIONS)),
+    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Encrypted keys, binary keystores and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
     "Embedded certificates and public keys are parsed from PEM blocks, JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
     "package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.",
     "Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.",
@@ -424,13 +424,31 @@ rule(
     priority=4, rationale="Parsing only; signature is verified separately in verifyToken.",
 )
 
+CNSA_MAC = "HMAC with SHA-384 or SHA-512 and a 256-bit key (symmetric; no PQC replacement needed)"
+
+
+def _set_jws_family(f, alg: str):
+    """HS* is HMAC: symmetric, Grover-affected only. Everything else in the JWS
+    registry that this scanner matches is an RSA/EC/EdDSA signature."""
+    if alg.upper().startswith("HS") or alg == "HMAC":
+        f["qclass"] = Q_GROVER
+        f["cnsa"] = CNSA_MAC
+        f["priority"] = 4
+        f["rationale"] = "HMAC is a symmetric MAC; not affected by Shor. Key length, not algorithm, decides adequacy. " + f["rationale"]
+
+
+def _refine_jwt_alg(f, lines, idx, m):
+    f["algorithm"] = m.group(1)
+    _set_jws_family(f, m.group(1))
+
+
 rule(
     id="JWT-ALG-LITERAL",
     regex=r"\balg\s*[:=]\s*['\"](RS256|RS384|RS512|PS256|PS384|PS512|ES256|ES384|ES512|EdDSA|HS256|HS384|HS512)['\"]",
     category="JWT/JWS/JWKS", algorithm="JWS alg literal", purpose="Advertise the signing algorithm in a published JWK",
     library="jsonwebtoken / node:crypto", protocol="JWKS", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD,
     priority=3, rationale="Algorithm identifier is a literal in the test IdP.",
-    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", m.group(1)),
+    refine=_refine_jwt_alg,
 )
 
 rule(
@@ -476,7 +494,10 @@ rule(
     category="JWT/JWS/JWKS", algorithm="JWK public key (static JWKS fixture)", purpose="Published signing key for the mock IdP used in container tests",
     library="static JSON", protocol="JWKS", qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD,
     priority=3, rationale="Static test JWKS; the key is the widely published insecure default and is on the application denylist.",
-    refine=lambda f, lines, idx, m: f.__setitem__("algorithm", {"RSA": "RSA", "EC": "ECDSA", "OKP": "EdDSA", "oct": "HMAC"}[m.group(1)] + " (JWK)"),
+    refine=lambda f, lines, idx, m: (
+        f.__setitem__("algorithm", {"RSA": "RSA", "EC": "ECDSA", "OKP": "EdDSA", "oct": "HMAC"}[m.group(1)] + " (JWK)"),
+        _set_jws_family(f, "HMAC" if m.group(1) == "oct" else ""),
+    ),
 )
 
 # ---- OIDC client (browser) ---------------------------------------------- #
@@ -593,14 +614,37 @@ def _classify_symmetric(f, tok):
             f["mode"] = mm.group(1)
 
 
+_CIPHERIV_CALL = re.compile(r"create(?:C|Dec)ipheriv\(")
+
+
 def _refine_cipheriv(f, lines, idx, m):
     f["library"] = "node:crypto"
-    if m.group(1):
-        _classify_symmetric(f, m.group(1))
+    literal = m.group(1)
+    if not literal:
+        # First argument may sit on a following line; read up to the call's
+        # first closing parenthesis.
+        rest = (lines[idx][m.end():] + "\n" + "\n".join(lines[idx + 1:idx + 4])).split(")", 1)[0]
+        lm = re.match(r"\s*['\"]([\w-]+)['\"]", rest)
+        literal = lm.group(1) if lm else None
+    if literal:
+        _classify_symmetric(f, literal)
     else:
         f["algorithm"] = "Symmetric cipher (algorithm supplied at runtime)"
         f["agility"] = AGILITY_CONFIG
         f["rationale"] = "Cipher name is not a literal at the call site; resolve the value in configuration."
+
+
+def _refine_cipher_literal(f, lines, idx, m):
+    """Skip literals that are the first argument of a createCipheriv /
+    createDecipheriv call (already inventoried by SYM-CIPHERIV), whether the
+    call opened on this line or on one of the three lines before it."""
+    before = "\n".join(lines[max(0, idx - 3):idx] + [lines[idx][:m.start()]])
+    cm = None
+    for cm in _CIPHERIV_CALL.finditer(before):
+        pass
+    if cm is not None and ")" not in before[cm.end():]:
+        return False
+    _classify_symmetric(f, m.group(0))
 
 
 rule(
@@ -613,11 +657,10 @@ rule(
 
 rule(
     id="SYM-CIPHER",
-    regex=r"\baes-(?:128|192|256)-(?:gcm|cbc|ctr|ecb|ccm)\b|\bAES-(?:GCM|CBC|CTR)\b|\bChaCha20(?:-Poly1305)?\b|\b3DES\b|\bdes-ede3(?:-cbc)?\b|\bTripleDES\b",
+    regex=r"\baes-(?:128|192|256)-(?:gcm|cbc|ctr|ecb|ccm)\b|\bAES-(?:GCM|CBC|CTR)\b|\b(?i:chacha20(?:-poly1305)?)\b|\b3DES\b|\bdes-ede3(?:-cbc)?\b|\bTripleDES\b",
     category="Symmetric", algorithm="Symmetric cipher", purpose="Encryption", library="",
     qclass=Q_GROVER, cnsa=CNSA_SYM, agility=AGILITY_HARD, priority=3, rationale="Symmetric cipher literal in code.",
-    refine=lambda f, lines, idx, m: _classify_symmetric(f, m.group(0)),
-    not_file_re=r"create(?:C|Dec)ipheriv\(",
+    refine=_refine_cipher_literal,
 )
 
 # ---- TLS ----------------------------------------------------------------- #
@@ -951,7 +994,9 @@ rule(
 
 rule(
     id="SECRET-DB-PASSWORD-LITERAL",
-    regex=r"\b(STIGMAN_DB_PASSWORD|MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)\b\s*[:=]\s*['\"]?[A-Za-z0-9_\-]{3,}['\"]?",
+    # Value: a quoted scalar, or an unquoted scalar up to whitespace or a
+    # comment. Values starting with `$` are references, not literals.
+    regex=r"\b(STIGMAN_DB_PASSWORD|MYSQL_ROOT_PASSWORD|MYSQL_PASSWORD)\b\s*[:=]\s*(?:'[^'\n]{3,}'|\"[^\"\n]{3,}\"|[^\s'\"$#][^\s#]{2,})",
     category="Secret", algorithm="Database password literal", purpose="Credential literal (type: database password)", library="",
     qclass=Q_NA, cnsa=CNSA_NONE, agility=AGILITY_HARD, priority=3,
     rationale="Literal credential in test/CI configuration; must not be reused in production.", evidence="label", label="[redacted] database password literal",
@@ -1036,6 +1081,55 @@ def _describe_public_key(pub) -> dict:
     if isinstance(pub, dsa.DSAPublicKey):
         return {"key_algorithm": "DSA", "key_size": f"DSA-{pub.key_size}", "curve": f"DSA-{pub.key_size}"}
     return {"key_algorithm": type(pub).__name__, "key_size": "", "curve": ""}
+
+
+def _parse_openssl_key_text(out: str) -> dict:
+    info = {"parser": "openssl"}
+    am = re.search(r"^(RSA|EC|DSA|ED25519|ED448|X25519|X448)?\s*(?:Public-Key|Private-Key):\s*(?:\((\d+) bit\))?", out, re.M)
+    if am:
+        alg = (am.group(1) or "").upper()
+        bits = am.group(2)
+        cm = re.search(r"(?:NIST CURVE|ASN1 OID): (\S+)", out)
+        if cm:
+            info.update({"key_algorithm": "ECDSA", "key_size": cm.group(1), "curve": cm.group(1)})
+        elif alg in ("ED25519", "ED448", "X25519", "X448"):
+            name = alg.capitalize()
+            info.update({"key_algorithm": name, "key_size": name, "curve": name})
+        elif bits:
+            info.update({"key_algorithm": alg or "RSA", "key_size": f"{alg or 'RSA'}-{bits}", "curve": f"{alg or 'RSA'}-{bits}"})
+    return info
+
+
+def parse_pem_key(pem: bytes, private: bool) -> dict:
+    """Algorithm and size of a PEM public or unencrypted private key. Only
+    public parameters are recorded; private components are never read into
+    the output."""
+    note = {"note": "private key material present; only public parameters recorded"} if private else {}
+    if HAVE_CRYPTOGRAPHY:
+        try:
+            key = serialization.load_pem_private_key(pem, password=None) if private else serialization.load_pem_public_key(pem)
+            info = _describe_public_key(key.public_key() if private else key)
+            info["parser"] = "cryptography"
+            info.update(note)
+            return info
+        except TypeError:
+            return {"parser": "none", "error": "encrypted private key; not parsed (passphrase required)", **note}
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+    else:
+        err = "cryptography not installed"
+    if HAVE_OPENSSL_CLI:
+        try:
+            args = ["openssl", "pkey", "-noout"] + (["-text_pub"] if private else ["-pubin", "-text"])
+            out = subprocess.run(args, input=pem, capture_output=True, check=True).stdout.decode(errors="replace")
+            info = _parse_openssl_key_text(out)
+            if "key_algorithm" in info:
+                info.update(note)
+                return info
+            err = "openssl output not recognised"
+        except Exception as e:  # noqa: BLE001
+            err = str(e)
+    return {"parser": "none", "error": f"key not parsed: {err}", **note}
 
 
 def parse_certificate_der(der: bytes) -> dict:
@@ -1316,8 +1410,14 @@ class Scanner:
         """Record certificate/key metadata. Returns the PEM text when the file is
         text so the caller can also run the pattern rules (KEYMAT-*) over it;
         returns None for binary files."""
-        data = p.read_bytes()
         entry = {"file": rel, "line": 1, "source": f"file ({p.suffix})", "scope": scope_for(rel)}
+        try:
+            data = p.read_bytes()
+        except OSError as ex:
+            entry.update({"parser": "none", "error": f"unreadable: {type(ex).__name__}"})
+            self.certificates.append(entry)
+            self.files_skipped += 1
+            return None
         if p.suffix.lower() in (".p12", ".pfx", ".jks"):
             entry.update({"parser": "none", "error": "binary keystore; not parsed (password required)"})
             self.certificates.append(entry)
@@ -1342,8 +1442,11 @@ class Scanner:
                     e.update(parse_certificate_der(base64.b64decode(re.sub(r"\s+", "", body), validate=True)))
                 except Exception as ex:  # noqa: BLE001
                     e.update({"parser": "none", "error": f"malformed PEM certificate block: {ex}"})
-            elif "PRIVATE KEY" in kind:
-                e.update({"parser": "none", "error": "private key present; not parsed", "key_algorithm": kind})
+            elif kind == "ENCRYPTED PRIVATE KEY" or "Proc-Type: 4,ENCRYPTED" in body:
+                e.update({"parser": "none", "error": "encrypted private key; not parsed (passphrase required)", "key_algorithm": kind})
+            elif "PRIVATE KEY" in kind or "PUBLIC KEY" in kind:
+                pem = f"-----BEGIN {kind}-----{body}-----END {kind}-----".encode()
+                e.update(parse_pem_key(pem, private="PRIVATE" in kind))
             else:
                 e.update({"parser": "none", "error": f"{kind} block not parsed"})
             self.certificates.append(e)
@@ -1575,7 +1678,7 @@ def git_tree_state(repo: Path, ignore_dirs: set[str]) -> str:
     ignored = {"docs/security/crypto-inventory"} | set(ignore_dirs)
     changed = [ln[3:] for ln in out.splitlines() if ln.strip()
                and not any(ln[3:].startswith(d + "/") for d in ignored)
-               and not ln[3:].startswith(".ruff_cache/")]
+               and not EXCLUDE_DIR_NAMES.intersection(ln[3:].split("/")[:-1])]
     return "clean: scanned source equals HEAD" if not changed else f"modified: {len(changed)} source path(s) differ from HEAD"
 
 
