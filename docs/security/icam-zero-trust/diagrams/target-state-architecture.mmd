@@ -1,0 +1,58 @@
+%% Target-state identity architecture. Components marked "GFI" are supplied or
+%% designated by the Government; Government-furnished DAF ICAM direction replaces
+%% the assumptions shown here.
+flowchart TB
+  subgraph Person["Person entity"]
+    CAC["CAC/PIV<br/>(DoD PKI, hardware token)"]
+    B["Browser<br/>ExtJS SPA + OIDC worker<br/>Auth Code + PKCE"]
+    CAC --> B
+  end
+
+  subgraph NPE["Non-person entities"]
+    SVC["Service clients<br/>certificate-based client auth<br/>(private_key_jwt or mTLS to IdP) - GFI policy"]
+  end
+
+  subgraph ENT["Enterprise identity services (GFI)"]
+    IDP["Enterprise IdP / federation broker<br/>OIDC provider for the application<br/>x.509 (CAC/PIV) authentication, MFA policy,<br/>session and token lifetime policy, conditional access"]
+    AUTH["Authoritative identity source<br/>persistent identifier (e.g. DoD ID / EDIPI or sub)<br/>and enterprise attributes"]
+    PAM["Privileged access / group lifecycle<br/>time-bound admin membership, approvals"]
+    PDP["Enterprise policy decision point<br/>(phase 4 option)"]
+    AUTH --> IDP
+    PAM --> IDP
+  end
+
+  subgraph APP["STIG Manager (application boundary)"]
+    RP["Reverse proxy / ingress<br/>TLS 1.2+, optional client-cert passthrough,<br/>security headers"]
+    PEP1["PEP 1: token validation<br/>auth.validateToken<br/>signature, alg allow-list, iss, aud (required),<br/>exp/nbf, acr/amr assurance claim (GFI contract)"]
+    PEP2["PEP 2: identity resolution<br/>auth.setupUser keyed on persistent identifier,<br/>username as display attribute,<br/>provisioning policy (JIT or pre-approved)"]
+    PEP3["PEP 3: scope + grant authorization<br/>OpenAPI scopes, collection grants/roles,<br/>attribute-derived grants (ABAC option),<br/>elevation with time-bound admin role"]
+    AUD["Security audit events<br/>authn/authz outcome, account and grant changes,<br/>privileged (elevated) actions, exports<br/>subject, object, outcome, source, requestId"]
+    RP --> PEP1 --> PEP2 --> PEP3
+    PEP1 --> AUD
+    PEP2 --> AUD
+    PEP3 --> AUD
+  end
+
+  subgraph DATA["Data tier"]
+    DB["MySQL<br/>TLS required, mTLS client cert,<br/>user_data + persistent identifier column,<br/>collection_grant"]
+  end
+
+  subgraph VIS["Visibility and analytics (GFI)"]
+    FWD["Log forwarder<br/>(container platform)"]
+    SIEM["SIEM / ICAM analytics<br/>alerting on authz failures, elevation, self-grant"]
+    FWD --> SIEM
+  end
+
+  SEC["Secrets management<br/>(platform secret store: DB credential,<br/>TLS keys, client secrets)"]
+
+  B -- "1. authenticate (CAC/PIV)" --> IDP
+  SVC -- "client_credentials" --> IDP
+  IDP -- "2. tokens with persistent id,<br/>roles/attributes, acr/amr" --> B
+  B -- "3. Bearer JWT" --> RP
+  SVC -- "Bearer JWT" --> RP
+  PEP1 -- "JWKS (HTTPS, pinned CA)" --> IDP
+  PEP3 -. "optional external decision" .-> PDP
+  PEP3 --> DB
+  AUD --> FWD
+  SEC -.-> APP
+  SEC -.-> DB
