@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0",
   "summary": {
-    "generated_utc": "2026-09-14T22:31:45+00:00",
-    "commit_sha": "4da806210cd254dbf8c9e20b8d85bcbe564a2323",
+    "generated_utc": "2026-09-14T22:46:02+00:00",
+    "commit_sha": "781f8a6e5ee67c9822f98f46f3cb9c3e155d7d13",
     "source_tree_vs_commit": "clean: scanned source equals HEAD",
     "files_scanned": 364,
     "files_skipped": 469,
-    "rules": 62,
+    "rules": 64,
     "total_findings": 144,
     "by_quantum_class": {
       "Quantum-vulnerable (Shor)": 17,
@@ -55,6 +55,8 @@
     "checks": [
       "Regex scan of text files (extensions: .bat, .cjs, .cnf, .conf, .csv, .env, .example, .html, .ini, .js, .json, .md, .mjs, .properties, .py, .rst, .sh, .sql, .toml, .ts, .txt, .yaml, .yml; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
       "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next 3 lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts.",
+      "Password hashing and KDF calls are matched as package calls or methods (bcrypt/bcryptjs/argon2 followed by any method such as hash, hashSync, compare, verify, including optional chaining), as node:crypto functions (pbkdf2/Sync, scrypt/Sync, hkdf/Sync) and as Web Crypto deriveBits/deriveKey/importKey with PBKDF2 or HKDF. Aliased imports (`const h = bcrypt.hash`, `import { hash } from 'bcrypt'`) are not followed.",
+      "Secret literals are matched as quoted assignments in any text file and as unquoted scalars only in dotenv, shell, YAML, properties, ini, conf, toml and Dockerfile inputs, where an unquoted value is a literal rather than an identifier; values starting with $, %, {, *, &, < or ( are treated as references or placeholders.",
       "Context window of ±12 lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options.",
       "Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed.",
       "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
@@ -63,7 +65,7 @@
       "If `node` is on PATH, the local runtime is probed for Node/OpenSSL versions, default TLS versions and ML-KEM/ML-DSA availability. This describes the scanning host, not the deployed container.",
       "Secrets: only path, line and type are recorded; matched values are never written.",
       "Certificate subject/issuer: only attribute types and self-signed status are recorded unless --dn-values is given.",
-      "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found anywhere in scanned files, one row per absence is added and anchored to the TLS server setup line."
+      "Absence checks: if no HSTS header and no explicit TLS option (minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder, ecdhCurve) is found in a file of scope API (server), Client (browser) or Repository, one row per absence is added and anchored to the TLS server setup line. Matches in Documentation, Test and CI scope are inventoried but do not satisfy the check, because prose describing a control does not configure it."
     ],
     "limits": [
       "Static text matching only. Dynamic algorithm selection (for example the algorithm list jsonwebtoken derives from the key type) is inferred from library source knowledge, not observed at runtime.",
@@ -512,7 +514,7 @@
       "line": 45,
       "algorithm": "HSTS header (not configured)",
       "agility": "Library-bound",
-      "gap": "No Strict-Transport-Security header or helmet() use in application code; browsers are not instructed to require HTTPS by the API itself.",
+      "gap": "No Strict-Transport-Security header or helmet() use in application code or deployable configuration (documentation, tests and CI excluded); browsers are not instructed to require HTTPS by the API itself.",
       "recommendation": "Set HSTS at the TLS terminator; document it as a deployment control.",
       "phase": "Phase 1"
     },
@@ -522,7 +524,7 @@
       "line": 45,
       "algorithm": "Explicit TLS options (none set)",
       "agility": "Library-bound",
-      "gap": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal anywhere in scanned files. Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
+      "gap": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal in application code or deployable configuration (documentation, tests and CI excluded). Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
       "recommendation": "Add configuration for a TLS 1.2 floor / TLS 1.3 preference and an approved cipher policy; verify hybrid ML-KEM group availability in the deployed image.",
       "phase": "Phase 1"
     },
@@ -1517,8 +1519,8 @@
       "category": "TLS",
       "algorithm": "HSTS header (not configured)",
       "key_size": "",
-      "mode": "No Strict-Transport-Security header or helmet() use in application code; browsers are not instructed to require HTTPS by the API itself.",
-      "purpose": "Absence check across all scanned files",
+      "mode": "No Strict-Transport-Security header or helmet() use in application code or deployable configuration (documentation, tests and CI excluded); browsers are not instructed to require HTTPS by the API itself.",
+      "purpose": "Absence check across application code and deployable configuration",
       "library": "node:tls",
       "protocol": "TLS",
       "security_relevant": "Yes",
@@ -1530,8 +1532,8 @@
       "rationale": "Absence recorded so the control can be assigned to the deployment layer or added as configuration.",
       "action": "Set HSTS at the TLS terminator; document it as a deployment control.",
       "phase": "Phase 1",
-      "gap": "No Strict-Transport-Security header or helmet() use in application code; browsers are not instructed to require HTTPS by the API itself.",
-      "evidence": "pattern not found in any scanned file",
+      "gap": "No Strict-Transport-Security header or helmet() use in application code or deployable configuration (documentation, tests and CI excluded); browsers are not instructed to require HTTPS by the API itself.",
+      "evidence": "pattern not found in any API, client or repository-level file",
       "rule": "ABSENT-HSTS"
     },
     {
@@ -1542,8 +1544,8 @@
       "category": "TLS",
       "algorithm": "Explicit TLS options (none set)",
       "key_size": "",
-      "mode": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal anywhere in scanned files. Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
-      "purpose": "Absence check across all scanned files",
+      "mode": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal in application code or deployable configuration (documentation, tests and CI excluded). Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
+      "purpose": "Absence check across application code and deployable configuration",
       "library": "node:tls",
       "protocol": "TLS",
       "security_relevant": "Yes",
@@ -1555,8 +1557,8 @@
       "rationale": "Absence recorded so the control can be assigned to the deployment layer or added as configuration.",
       "action": "Add configuration for a TLS 1.2 floor / TLS 1.3 preference and an approved cipher policy; verify hybrid ML-KEM group availability in the deployed image.",
       "phase": "Phase 1",
-      "gap": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal anywhere in scanned files. Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
-      "evidence": "pattern not found in any scanned file",
+      "gap": "No minVersion, maxVersion, ciphers, rejectUnauthorized, secureOptions, honorCipherOrder or ecdhCurve literal in application code or deployable configuration (documentation, tests and CI excluded). Node.js defaults apply to the API server, the MySQL client and the IdP clients.",
+      "evidence": "pattern not found in any API, client or repository-level file",
       "rule": "ABSENT-TLS-OPTIONS"
     },
     {
