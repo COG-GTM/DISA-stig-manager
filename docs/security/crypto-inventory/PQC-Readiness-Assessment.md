@@ -2,8 +2,8 @@
 
 **System:** STIG Manager (API, browser client, database schema, deployment assets in this repository)
 **Deliverable:** CDRL A009 — Cryptographic Inventory and PQC Readiness Assessment
-**Commit scanned:** `0ac904c6c01e2ab14e783ecfa03588c8531870d2`
-**Generated:** 2026-09-14T22:02:01+00:00 by `scripts/crypto_inventory.py`
+**Commit scanned:** `39981a00c9e50c03b738062556a2eb050224704f`
+**Generated:** 2026-09-14T22:10:31+00:00 by `scripts/crypto_inventory.py`
 **Companion files:** `Cryptographic-Inventory.xlsx`, `crypto-inventory.json` (same directory)
 
 > NO production cryptographic service is introduced, replaced, disabled, or reconfigured by this work — recommendations only, pending Government authorization.
@@ -59,7 +59,7 @@ Recommended immediate actions (Phase 0/1, no production change): adopt this inve
 
 ### 2.3 Scope
 
-Scanned: every text file under the repository at commit `0ac904c6c01e2ab14e783ecfa03588c8531870d2` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
+Scanned: every text file under the repository at commit `39981a00c9e50c03b738062556a2eb050224704f` (source tree state at scan time: clean: scanned source equals HEAD) except the exclusions below, plus `package.json`/`package-lock.json` for versions and JWKS/PEM material for certificate parsing. The generated artifacts are committed on top of this source, so the commit that adds them is the child of the SHA recorded here.
 
 Not scanned or out of scope:
 
@@ -78,7 +78,7 @@ What it does:
 - Regex scan of text files (extensions: .bat, .cjs, .cnf, .conf, .csv, .env, .example, .html, .ini, .js, .json, .md, .mjs, .properties, .py, .rst, .sh, .sql, .toml, .ts, .txt, .yaml, .yml; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.
 - Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present.
 - Context window of ±12 lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options.
-- Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI.
+- Certificate and key files by extension (.cer, .crt, .csr, .der, .jks, .key, .p12, .pem, .pfx) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Encrypted keys, binary keystores and unreadable files are recorded as not parsed.
 - Embedded certificates and public keys are parsed from PEM blocks, JWKS `x5c` arrays and TUF/Notary root metadata (root.json).
 - package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.
 - Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.
