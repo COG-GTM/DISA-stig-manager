@@ -152,7 +152,7 @@ METHOD_CHECKS = [
     "Regex scan of text files (extensions: " + ", ".join(sorted(TEXT_EXTENSIONS)) + "; plus Dockerfile, .gitignore) for asymmetric, symmetric, hash, KDF, TLS, JWT/JWS/JWKS, randomness and secret patterns.",
     "Node.js crypto API calls are matched by name: generateKeyPair/Sync (rsa, rsa-pss, ec, ed25519, ed448, x25519, x448, dsa, dh), createECDH, diffieHellman, computeSecret, createDiffieHellman/Group, getDiffieHellman, createSign/createVerify, crypto.sign/verify, createCipheriv/createDecipheriv, and Web Crypto subtle.* calls with a public-key algorithm name. Curve, prime length and cipher name are taken from the literal arguments of the same call when present. Call rules are matched against the call's first line plus the next %d lines, so an argument list that continues on the following line is still inventoried once, at the line where the call starts." % (CALL_WINDOW - 1),
     "Context window of ±%d lines is inspected to infer key sizes (modulusLength, JWK `n` length), purpose (PKCE, kid derivation, attachment metadata), and presence/absence of TLS or JWT verification options." % WINDOW,
-    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Encrypted keys, binary keystores and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
+    "Certificate and key files by extension (%s) are parsed with `cryptography` or the `openssl` CLI. PEM certificates give subject/issuer attribute types, key algorithm/size, signature algorithm and validity; PEM public keys and unencrypted private keys give key algorithm and size only (public parameters; private components are never read into the output). Files without a PEM block are tried as DER certificate, then DER private key, then DER public key, and get a KEYMAT-DER-* inventory row; keystores and files that parse as none of these get a KEYMAT-FILE-UNPARSED row (priority 2) and are recorded as not parsed. Encrypted keys and unreadable files are recorded as not parsed." % ", ".join(sorted(CERT_EXTENSIONS)),
     "PEM blocks (certificate, public key, private key) found in any scanned text file are parsed the same way and the parsed algorithm, size, signature algorithm and validity are copied into the KEYMAT-PEM-* inventory row; RSA/DSA below 2048 bits and SHA-1/MD5 certificate signatures are classified as deprecated/weak. Blocks that cannot be parsed keep the block-type classification and say so in the Mode column. Public keys are also parsed from JWKS `x5c` arrays and TUF/Notary root metadata (root.json).",
     "package.json and package-lock.json files are read for declared and resolved versions of libraries with a cryptographic role.",
     "Dockerfiles, GitHub Actions workflows and pkg build configuration are read for Node.js runtime pins.",
@@ -167,7 +167,7 @@ METHOD_LIMITS = [
     "Key sizes are recorded only where they appear in source (modulusLength), can be derived from embedded key material (JWK `n`, SPKI), or are stated in comments. Keys supplied at deployment time (TLS certificates, IdP signing keys) are not visible to the scanner.",
     "TLS protocol versions and cipher suites negotiated at runtime depend on the Node.js/OpenSSL build of the container image and on peers (reverse proxy, MySQL server, IdP, browsers). The scanner records what the repository configures and flags what it does not configure.",
     "Vendored third-party code (client/src/ext), minified bundles, lockfiles (except for version extraction), XCCDF/CKL STIG content fixtures (test/api/form-data-files, *.xml, *.ckl), generated docs, this scanner and its own output (the canonical docs/security/crypto-inventory directory, any in-repository --out directory, and the concrete JSON/XLSX/report/template output paths, so that `--out .` does not inventory the previous run) are not pattern-scanned.",
-    "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. A PEM block may span at most %d lines; longer blocks are recorded as not parsed. Binary keystores (.p12, .pfx, .jks) are recorded as not parsed." % PEM_MAX_LINES,
+    "Text PEM files with certificate/key extensions are parsed for metadata and also run through the pattern rules, so a committed private key appears both in the certificate table and as a Secret row. A PEM block may span at most %d lines; longer blocks are recorded as not parsed. Binary keystores (.p12, .pfx, .jks) are inventoried by path only; their contents are not parsed (password required)." % PEM_MAX_LINES,
     "Prose in documentation is scanned only for configuration identifiers (environment variable names, TLS directives). Narrative mentions of algorithms in release notes or user guides are not inventoried.",
     "Secret detection uses simple assignment patterns and JWT/JWK/PEM shapes. It will miss encoded or split secrets and may flag placeholder values used in tests; each Secret row is labeled with its scope (Test, CI, Documentation).",
     "The `node:lts-alpine` tag and `lts/*` CI alias resolve to different Node versions over time. The resolved version is recorded only when supplied with --lts-resolves-to.",
@@ -201,8 +201,12 @@ def rule(**kw):
     # A call whose argument list may continue on the next line (`name(` then
     # whitespace, `{`, or a `[^)]` run) is matched against a short multi-line
     # window rather than a single physical line.
-    kw.setdefault("multiline", bool(re.search(r"\\\((?:\\s\*|\\\{|\[\^\)\])", kw["regex"])))
-    kw["regex"] = re.compile(kw["regex"])
+    # Synthetic rules have no regex; the scanner creates their rows directly
+    # (for example from a parsed binary key file).
+    kw.setdefault("synthetic", "regex" not in kw)
+    if not kw["synthetic"]:
+        kw.setdefault("multiline", bool(re.search(r"\\\((?:\\s\*|\\\{|\[\^\)\])", kw["regex"])))
+        kw["regex"] = re.compile(kw["regex"])
     if "file_re" in kw:
         kw["file_re"] = re.compile(kw["file_re"])
     if "not_file_re" in kw:
@@ -991,9 +995,16 @@ def _refine_pem_block(f, lines, idx, m):
     bm = _PEM_BLOCK_RE.match(text)
     info = parse_pem_block(kind, bm.group(2)) if bm else {"parser": "none", "error": f"no matching END marker within {PEM_MAX_LINES} lines"}
     f["_pem_info"] = {"source": f"PEM {kind} (embedded)", **info}
+    _apply_key_info(f, info)
+
+
+def _apply_key_info(f, info):
+    """Copy parsed key/certificate metadata into an inventory row and classify
+    the row by the parsed strength."""
     if info.get("error"):
-        f["mode"] = f"not parsed: {info['error']}"
-        f["rationale"] += " Key strength not parsed; classified by block type only."
+        err = info["error"]
+        f["mode"] = err if "not parsed" in err else f"not parsed: {err}"
+        f["rationale"] += " Key strength not parsed; classified by file/block type only."
         return
     alg, size = info.get("key_algorithm", ""), info.get("key_size", "")
     if alg:
@@ -1033,6 +1044,37 @@ rule(
     category="Certificate/Key material", algorithm="X.509 certificate (PEM)", purpose="Embedded certificate", library="",
     qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3, rationale="Certificate committed to the repository.",
     evidence="label", label="PEM certificate block", refine=_refine_pem_block,
+)
+
+# Rows for binary (DER) certificate/key files and keystores are created by
+# Scanner.inspect_cert_file from the parsed file, not by a regex.
+rule(
+    id="KEYMAT-DER-PRIVATE",
+    category="Secret", algorithm="DER private key", purpose="Committed private key file", library="",
+    qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=1, rationale="Private key material committed to the repository.",
+    evidence="label", label="[redacted] DER private key file",
+)
+
+rule(
+    id="KEYMAT-DER-PUBLIC",
+    category="Certificate/Key material", algorithm="DER public key", purpose="Committed public key file", library="",
+    qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3, rationale="Public key committed to the repository.",
+    evidence="label", label="DER public key file",
+)
+
+rule(
+    id="KEYMAT-DER-CERT",
+    category="Certificate/Key material", algorithm="X.509 certificate (DER)", purpose="Committed certificate file", library="",
+    qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=3, rationale="Certificate committed to the repository.",
+    evidence="label", label="DER certificate file",
+)
+
+rule(
+    id="KEYMAT-FILE-UNPARSED",
+    category="Certificate/Key material", algorithm="Key/certificate file (contents not parsed)", purpose="Committed key or certificate file", library="",
+    qclass=Q_SHOR, cnsa=CNSA_SIG, agility=AGILITY_HARD, priority=2,
+    rationale="File with a certificate/key extension whose contents could not be parsed; it may hold private keys and must be inspected by hand.",
+    evidence="label", label="key/certificate file, contents not parsed",
 )
 
 # ---- Secrets (type + location only) ------------------------------------- #
@@ -1145,14 +1187,17 @@ def _parse_openssl_key_text(out: str) -> dict:
     return info
 
 
-def parse_pem_key(pem: bytes, private: bool) -> dict:
-    """Algorithm and size of a PEM public or unencrypted private key. Only
-    public parameters are recorded; private components are never read into
-    the output."""
+def _parse_key(data: bytes, private: bool, der: bool) -> dict:
+    """Algorithm and size of a public or unencrypted private key in PEM or DER
+    form. Only public parameters are recorded; private components are never
+    read into the output."""
     note = {"note": "private key material present; only public parameters recorded"} if private else {}
     if HAVE_CRYPTOGRAPHY:
         try:
-            key = serialization.load_pem_private_key(pem, password=None) if private else serialization.load_pem_public_key(pem)
+            if der:
+                key = serialization.load_der_private_key(data, password=None) if private else serialization.load_der_public_key(data)
+            else:
+                key = serialization.load_pem_private_key(data, password=None) if private else serialization.load_pem_public_key(data)
             info = _describe_public_key(key.public_key() if private else key)
             info["parser"] = "cryptography"
             info.update(note)
@@ -1165,16 +1210,37 @@ def parse_pem_key(pem: bytes, private: bool) -> dict:
         err = "cryptography not installed"
     if HAVE_OPENSSL_CLI:
         try:
-            args = ["openssl", "pkey", "-noout"] + (["-text_pub"] if private else ["-pubin", "-text"])
-            out = subprocess.run(args, input=pem, capture_output=True, check=True).stdout.decode(errors="replace")
+            args = ["openssl", "pkey", "-noout", "-inform", "DER" if der else "PEM"] + (["-text_pub"] if private else ["-pubin", "-text"])
+            out = subprocess.run(args, input=data, capture_output=True, check=True).stdout.decode(errors="replace")
             info = _parse_openssl_key_text(out)
             if "key_algorithm" in info:
                 info.update(note)
                 return info
             err = "openssl output not recognised"
+        except subprocess.CalledProcessError as e:
+            err = f"openssl pkey could not decode the key (exit {e.returncode})"
         except Exception as e:  # noqa: BLE001
             err = str(e)
     return {"parser": "none", "error": f"key not parsed: {err}", **note}
+
+
+def parse_pem_key(pem: bytes, private: bool) -> dict:
+    return _parse_key(pem, private, der=False)
+
+
+def parse_der_material(der: bytes) -> dict:
+    """Metadata for a file with a certificate/key extension and no PEM block.
+    Tries X.509 certificate, then unencrypted private key, then public key
+    (PKCS#8/SPKI/PKCS#1 DER). The result carries ``material`` naming what was
+    recognised; nothing recognised gives ``parser: none`` and an error."""
+    info = parse_certificate_der(der)
+    if not info.get("error"):
+        return {"material": "certificate", **info}
+    for material, private in (("private key", True), ("public key", False)):
+        info = _parse_key(der, private, der=True)
+        if not info.get("error") or info["error"].startswith("encrypted private key"):
+            return {"material": material, **info}
+    return {"parser": "none", "error": "not recognised as an X.509 certificate, private key or public key (PEM or DER)"}
 
 
 def parse_certificate_der(der: bytes) -> dict:
@@ -1391,7 +1457,7 @@ class Scanner:
         scope = scope_for(rel)
         seen_collapse: dict[str, dict] = {}
         for r in RULES:
-            if "file_re" in r and not r["file_re"].search(rel):
+            if r["synthetic"] or ("file_re" in r and not r["file_re"].search(rel)):
                 continue
             for idx, line in enumerate(lines):
                 if "not_file_re" in r and r["not_file_re"].search(line):
@@ -1506,21 +1572,29 @@ class Scanner:
         except OSError as ex:
             entry.update({"parser": "none", "error": f"unreadable: {type(ex).__name__}"})
             self.certificates.append(entry)
+            self.add_file_finding("KEYMAT-FILE-UNPARSED", rel, entry)
             self.files_skipped += 1
             return None
         if p.suffix.lower() in (".p12", ".pfx", ".jks"):
             entry.update({"parser": "none", "error": "binary keystore; not parsed (password required)"})
             self.certificates.append(entry)
+            self.add_file_finding("KEYMAT-FILE-UNPARSED", rel, entry)
             return None
         text = data.decode("utf-8", errors="replace")
         blocks = [(m.group(1), m.group(2), text.count("\n", 0, m.start()) + 1) for m in _PEM_BLOCK_RE.finditer(text)]
         if not blocks:
             try:
-                info = parse_certificate_der(data)
+                info = parse_der_material(data)
             except Exception as e:  # noqa: BLE001
                 info = {"parser": "none", "error": f"not parsed: {e}"}
+            material = info.pop("material", None)
+            if material:
+                entry["source"] += f" DER {material}"
             entry.update(info)
             self.certificates.append(entry)
+            rule_id = {"certificate": "KEYMAT-DER-CERT", "private key": "KEYMAT-DER-PRIVATE",
+                       "public key": "KEYMAT-DER-PUBLIC"}.get(material, "KEYMAT-FILE-UNPARSED")
+            self.add_file_finding(rule_id, rel, entry)
             return None
         for kind, body, line in blocks:
             e = dict(entry)
@@ -1529,6 +1603,14 @@ class Scanner:
             e.update(parse_pem_block(kind, body))
             self.certificates.append(e)
         return text
+
+    def add_file_finding(self, rule_id: str, rel: str, info: dict):
+        """Inventory row for a whole binary key/certificate file, classified by
+        the parsed metadata like an embedded PEM block."""
+        r = next(r for r in RULES if r["id"] == rule_id)
+        f = self.new_finding(r, rel, 1, None, scope_for(rel))
+        _apply_key_info(f, info)
+        self.findings.append(f)
 
     # -- libraries ----------------------------------------------------------
     def collect_libraries(self):
@@ -1717,8 +1799,8 @@ console.log(JSON.stringify(out));
             "by_category": OrderedDict(sorted(by_category.items())),
             "by_scope": OrderedDict(sorted(by_scope.items())),
             "by_agility": OrderedDict(sorted(by_agility.items())),
-            "certificates_parsed": len([c for c in self.certificates if c.get("subject")]),
-            "certificates_unparsed": len([c for c in self.certificates if not c.get("subject")]),
+            "certificates_parsed": len([c for c in self.certificates if not c.get("error") and c.get("parser") not in (None, "none")]),
+            "certificates_unparsed": len([c for c in self.certificates if c.get("error") or c.get("parser") in (None, "none")]),
             "libraries": len(self.libraries),
         }
 
@@ -1893,7 +1975,7 @@ def write_xlsx(doc: dict, path: Path):
     kv = [("Generated (UTC)", s["generated_utc"]), ("Commit SHA scanned", s["commit_sha"]), ("Source tree vs. commit", s["source_tree_vs_commit"]),
           ("Files pattern-scanned", s["files_scanned"]),
           ("Files skipped (binary/oversize/excluded type)", s["files_skipped"]), ("Detection rules", s["rules"]), ("Inventory rows", s["total_findings"]),
-          ("Certificates parsed", s["certificates_parsed"]), ("Certificate entries not parsed", s["certificates_unparsed"]), ("Libraries inventoried", s["libraries"])]
+          ("Certificate/key entries parsed", s["certificates_parsed"]), ("Certificate/key entries not parsed", s["certificates_unparsed"]), ("Libraries inventoried", s["libraries"])]
     for k, v in kv:
         ws.append([k, v])
     for label, d in (("Rows by quantum-vulnerability class", s["by_quantum_class"]), ("Rows by migration priority (1 = highest)", s["by_priority"]),
