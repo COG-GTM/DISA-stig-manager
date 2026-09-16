@@ -158,9 +158,9 @@
       "id": "FM-01",
       "dependency_id": "DEP-01",
       "condition": "Denied",
-      "behavior": "At startup: discovery is retried 24 times at 5 s (about 2 min), then state becomes 'fail' and the process exits with code 1. Mid-session: scheduled refresh (every cacheMaxAge/2, default 5 min) fails and is retried every 10 s; when the stale timer fires at cacheMaxAge (default 10 min) known keys are cleared, oidc status is set false, state becomes 'unavailable', and all /api requests except /api/op/state receive 503 until a refresh succeeds. Tokens carrying a kid not in cache are rejected with SigningKeyNotFoundError after one failed refresh attempt.",
+      "behavior": "At startup: discovery is retried 24 times at 5 s (about 2 min), then state becomes 'fail' and the process exits with code 1. Mid-session: scheduled refresh (every cacheMaxAge/2, default 5 min) fails and is retried every 10 s; when the stale timer fires at cacheMaxAge (default 10 min) known keys are cleared, oidc status is set false, state becomes 'unavailable', and all /api requests except /api/op/state receive 503 until a refresh succeeds. Tokens carrying a kid not in cache are rejected with SigningKeyNotFoundError after one failed refresh attempt. That on-demand attempt is refreshCache(false): it clears the pending scheduled-refresh (or 10 s retry) timer before fetching and, on failure, does not re-arm it, so the background refresh chain is dead from that point. Once the stale timer then fires, the service check runs ahead of token validation and short-circuits every /api request with 503, so no request can reach getSigningKey to trigger another fetch; restoring the IdP does not restore the API, which stays 'unavailable' until process restart. The only remaining in-process trigger is an admin authenticating to the /socket/log-socket WebSocket (not under /api, so not gated) with a kid that is no longer cached.",
       "confidence": "confirmed",
-      "security_consequence": ["availability loss (fail-closed)", "no auth bypass: unknown or stale keys are never trusted", "audit-log gap while 503s are returned (transactions are still logged as 503)"],
+      "security_consequence": ["availability loss (fail-closed)", "no auth bypass: unknown or stale keys are never trusted", "audit-log gap while 503s are returned (transactions are still logged as 503)", "no automatic recovery when an unknown kid was presented during the outage: 503 persists after the IdP returns until restart (CP-10)"],
       "evidence": [
         "api/source/utils/auth.js:278-287",
         "api/source/utils/state.js:180-184",
@@ -168,7 +168,12 @@
         "api/source/utils/jwksCache.js:63-74",
         "api/source/utils/auth.js:209-215",
         "api/source/utils/auth.js:51-71",
-        "api/source/bootstrap/middlewares.js:61-76"
+        "api/source/utils/auth.js:55",
+        "api/source/utils/jwksCache.js:47",
+        "api/source/utils/jwksCache.js:54",
+        "api/source/bootstrap/middlewares.js:22-31",
+        "api/source/bootstrap/middlewares.js:61-76",
+        "api/source/utils/logSocket.js:172"
       ]
     },
     {
@@ -188,9 +193,9 @@
       "id": "FM-03",
       "dependency_id": "DEP-01",
       "condition": "Intermittent",
-      "behavior": "A failed scheduled refresh is retried every 10 s; the stale timer is only armed after a successful update, so the cache remains valid for cacheMaxAge after the last success. Recovery is automatic: the next successful refresh emits cacheUpdate, oidc status returns to true and state returns to 'available'. Unknown kids seen during an outage are cached as 'unknown' sentinels that survive both the stale clear and successful refreshes (clearCacheKeepUnknown runs in both paths); a sentinel is overwritten only when a later successful JWKS fetch publishes that kid (setKey replaces the Map entry). Because a cached sentinel never triggers an on-demand refresh, a token signed with a key that was probed during the outage stays rejected until the next scheduled refresh (up to cacheMaxAge/2, default 5 min) after connectivity returns; a kid that is never published stays rejected until process restart.",
+      "behavior": "A failed scheduled refresh is retried every 10 s; the stale timer is only armed after a successful update, so the cache remains valid for cacheMaxAge after the last success. Recovery is automatic: the next successful refresh emits cacheUpdate, oidc status returns to true and state returns to 'available'. Unknown kids seen during an outage are cached as 'unknown' sentinels that survive both the stale clear and successful refreshes (clearCacheKeepUnknown runs in both paths); a sentinel is overwritten only when a later successful JWKS fetch publishes that kid (setKey replaces the Map entry). Because a cached sentinel never triggers an on-demand refresh, a token signed with a key that was probed during the outage stays rejected until the next scheduled refresh (up to cacheMaxAge/2, default 5 min) after connectivity returns; a kid that is never published stays rejected until process restart. The automatic recovery above holds only while a scheduled refresh (or its 10 s retry) is still armed. The on-demand refresh for an unknown kid is refreshCache(false), which clears that timer before fetching and does not re-arm it on failure. If the fetch fails (IdP still down) there is no longer any scheduled JWKS request: recovery then depends on a later on-demand refresh succeeding, which can happen only while the API is still 'available' (a different, previously unseen kid arrives before the stale timer fires, or an admin authenticates to the ungated /socket/log-socket endpoint). After the stale timer fires, /api requests are short-circuited with 503 before token validation, so a brief IdP outage that coincided with a single unknown-kid request leaves the API 'unavailable' until restart even though the IdP has returned.",
       "confidence": "confirmed",
-      "security_consequence": ["stale-key risk bounded by STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min): a key revoked at the IdP remains trusted until refresh", "IdP key rotation during an outage causes user lockout until the first scheduled refresh after connectivity returns (not merely until connectivity returns)"],
+      "security_consequence": ["stale-key risk bounded by STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min): a key revoked at the IdP remains trusted until refresh", "IdP key rotation during an outage causes user lockout until the first scheduled refresh after connectivity returns (not merely until connectivity returns)", "a single unknown-kid request during a transient outage converts a self-healing degradation into an outage that requires operator intervention (CP-10)"],
       "evidence": [
         "api/source/utils/jwksCache.js:54",
         "api/source/utils/jwksCache.js:63-69",
@@ -199,7 +204,12 @@
         "api/source/utils/auth.js:212-214",
         "api/source/utils/auth.js:51-53",
         "api/source/utils/auth.js:59-62",
-        "api/source/utils/config.js:100"
+        "api/source/utils/config.js:100",
+        "api/source/utils/auth.js:55",
+        "api/source/utils/jwksCache.js:45-57",
+        "api/source/bootstrap/middlewares.js:22-31",
+        "api/source/bootstrap/middlewares.js:64-66",
+        "api/source/utils/logSocket.js:172"
       ]
     },
     {
@@ -604,13 +614,13 @@
       "id": "REC-03",
       "rank": 3,
       "title": "Define the IdP-unreachable policy for the API (JWKS staleness window)",
-      "recommendation": "Decide and document how long the API may keep verifying tokens with last-known JWKS keys when the IdP is unreachable. Today this is STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min, max 35791 min), after which the API fails closed with 503. For enclave deployments, set the value to the mission-approved window, and consider an engineering change that distinguishes 'refresh failed' from 'keys expired' so that revocation latency and availability can be tuned independently.",
+      "recommendation": "Decide and document how long the API may keep verifying tokens with last-known JWKS keys when the IdP is unreachable. Today this is STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min, max 35791 min), after which the API fails closed with 503. For enclave deployments, set the value to the mission-approved window, and consider an engineering change that distinguishes 'refresh failed' from 'keys expired' so that revocation latency and availability can be tuned independently. Independently of the policy value, fix the no-recovery branch: getSigningKey calls refreshCache(false), which cancels the scheduled refresh timer and does not re-arm it on failure, so an unknown kid presented during an outage leaves no JWKS request scheduled and the API stays 503 after the IdP returns. Preserve the existing timer across on-demand refreshes (or re-arm the 10 s retry when the on-demand fetch fails), and have the cacheStale handler start a retry loop so an 'unavailable' API always has a pending path back to 'available'.",
       "conditions": ["Denied", "Intermittent"],
       "nist_controls": ["IA-5", "SC-23", "CP-10"],
       "effort": "M",
       "owner": "Government decision (policy) + Engineering (implementation)",
       "addresses": ["FM-01", "FM-03"],
-      "evidence": ["api/source/utils/config.js:100", "api/source/utils/jwksCache.js:14-15", "api/source/utils/auth.js:209-215"]
+      "evidence": ["api/source/utils/config.js:100", "api/source/utils/jwksCache.js:14-15", "api/source/utils/auth.js:209-215", "api/source/utils/auth.js:55", "api/source/utils/jwksCache.js:47-55", "api/source/bootstrap/middlewares.js:22-31"]
     },
     {
       "id": "REC-04",
@@ -768,10 +778,10 @@
       "id": "LAB-03",
       "recommendation_id": "REC-03",
       "tooling": "docker compose + `docker stop` on the IdP; existing test/state harness pattern",
-      "setup": "STIGMAN_JWKS_CACHE_MAX_AGE set to the approved window (e.g., 60).",
-      "steps": ["Obtain a token; stop the IdP container.", "Call an authenticated endpoint every 30 s and record the first 503.", "Restart the IdP and record time to 'available'."],
-      "pass": "503 begins only after the approved window elapses; recovery occurs within one refresh interval (<= 10 s retry) after the IdP returns; tokens with unknown kids are rejected throughout.",
-      "fail": "503 occurs earlier than the window, recovery requires an API restart, or any unknown-kid token is accepted."
+      "setup": "STIGMAN_JWKS_CACHE_MAX_AGE set to the approved window (e.g., 60). Two tokens: A signed with a kid the API has cached, B signed with a second key that is present on the IdP but was never fetched by the API (add the key to the mock JWKS after the API's last refresh, or use test/utils/mockOidc.js with a second kid).",
+      "steps": ["Run 1 (scheduled path): obtain token A; stop the IdP container.", "Call an authenticated endpoint with A every 30 s and record the first 503.", "Restart the IdP and record time to 'available' via /api/op/state.", "Run 2 (on-demand path): restart the API; obtain A and B; stop the IdP; immediately present B once (expect 401 SigningKeyNotFoundError) so getSigningKey runs refreshCache(false) while the IdP is down.", "Continue calling with A every 30 s; record the first 503.", "Restart the IdP; poll /api/op/state for at least 3 x STIGMAN_JWKS_CACHE_MAX_AGE and record whether 'available' returns without an API restart."],
+      "pass": "In both runs 503 begins only after the approved window elapses, tokens with unknown kids are rejected throughout, and recovery to 'available' occurs within one refresh interval (<= 10 s retry) after the IdP returns without restarting the API. (At the assessed commit run 2 is expected to fail: no JWKS request remains scheduled after the failed on-demand refresh, so 503 persists until restart.)",
+      "fail": "503 occurs earlier than the window, recovery in either run requires an API restart, or any unknown-kid token is accepted."
     },
     {
       "id": "LAB-04",
@@ -830,11 +840,11 @@
     {
       "id": "LAB-10",
       "recommendation_id": "REC-10",
-      "tooling": "docker compose + `faketime`/`date -s` inside the API container (or libfaketime)",
-      "setup": "IdP clock correct; API clock skewed +45 s and then -45 s.",
-      "steps": ["Skew the API clock +45 s; call an endpoint with a freshly issued 5-min token.", "Skew -45 s; call with a token 30 s past exp."],
-      "pass": "With the configured tolerance (e.g., 60 s) the fresh token is accepted under +45 s skew; a token more than tolerance past exp is rejected.",
-      "fail": "Fresh tokens rejected due to skew inside tolerance, or expired tokens beyond tolerance accepted."
+      "tooling": "docker compose + libfaketime (or `date -s`) inside the API container; tokens minted with test/utils/mockOidc.js getToken (issuedAt/expiresIn) plus a local nbf claim via jsonwebtoken's notBefore option, since not every IdP emits nbf",
+      "setup": "IdP/minting clock is the reference. All offsets below are the API clock relative to that reference. Run the whole matrix twice: once with the implemented tolerance set to 60 s, once as a control with tolerance 0 s (the assessed-commit behavior). Tokens: T1 = iat = nbf = now, exp = now + 300 s (nbf present); T2 = exp = now - 30 s; T3 = exp = now - 90 s.",
+      "steps": ["API clock -45 s (behind the IdP): present T1. Its nbf is 45 s in the API's future, so acceptance depends only on tolerance.", "API clock correct: present T2 (30 s past exp, inside a 60 s tolerance).", "API clock correct: present T3 (90 s past exp, beyond a 60 s tolerance).", "API clock +45 s (ahead): present T2 again (now 75 s past exp as seen by the API).", "Repeat steps 1-4 with tolerance 0 s."],
+      "pass": "Tolerance 60 s: T1 at -45 s accepted (200); T2 at correct clock accepted; T3 rejected (401); T2 at +45 s rejected. Tolerance 0 s (control): T1 at -45 s rejected (jwt not active); T2 rejected; T3 rejected. Every rejection is a typed 401, never a 500. The two runs must differ exactly on the T1 and T2 rows, proving the setting is wired into jwt.verify.",
+      "fail": "Any row deviates from the matrix, the 60 s and 0 s runs produce identical results (tolerance not applied), or a rejection surfaces as a 500 with a stack trace."
     },
     {
       "id": "LAB-11",
