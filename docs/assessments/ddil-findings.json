@@ -244,7 +244,7 @@
       "id": "FM-06",
       "dependency_id": "DEP-02",
       "condition": "Degraded",
-      "behavior": "The pool config sets connectionLimit (default 25) and TCP keepalive (10 s initial delay) but no connectTimeout, no per-query timeout, and no acquire timeout. Slow queries therefore hold connections indefinitely; once 25 connections are busy new requests queue inside mysql2 with no bound (inferred: mysql2 default queueLimit 0 = unlimited). Because the client has an effectively infinite XHR timeout (30,000,000 ms), users see hung requests rather than errors. Deadlocks are retried 15 times at 200 ms.",
+      "behavior": "The pool config sets connectionLimit (default 25) and TCP keepalive (10 s initial delay) but no connectTimeout, no per-query timeout, and no acquire timeout. Slow queries therefore hold connections indefinitely; once 25 connections are busy new requests queue inside mysql2 with no bound (inferred: mysql2 default queueLimit 0 = unlimited). Because the client XHR timeout is about 8.3 h (30,000,000 ms), users see hung requests rather than timely errors. Deadlocks are retried 15 times at 200 ms.",
       "confidence": "confirmed for configuration; inferred for mysql2 queue default",
       "security_consequence": ["denial of service via connection/queue exhaustion (SC-5)", "state remains 'available' so the SSE monitor does not warn users", "no data-integrity risk: transactions commit or roll back atomically"],
       "evidence": [
@@ -361,7 +361,7 @@
       "id": "FM-14",
       "dependency_id": "DEP-04",
       "condition": "Degraded",
-      "behavior": "Global Ext.Ajax.timeout is 30,000,000 ms (about 8.3 h), so XHRs never time out client-side; a stalled request appears as an indefinite mask/spinner. The first SSE event must arrive within 5 s or the client refuses to initialize (unless STIGMAN_CLIENT_STATE_EVENTS=false). Server-side, in-flight requests whose client disconnects are logged with clientTerminated=true.",
+      "behavior": "Global Ext.Ajax.timeout is 30,000,000 ms (about 8.3 h): a stalled XHR is finite but is not abandoned client-side for roughly a working day, so to the user it appears as an indefinite mask/spinner. The first SSE event must arrive within 5 s or the client refuses to initialize (unless STIGMAN_CLIENT_STATE_EVENTS=false). Server-side, in-flight requests whose client disconnects are logged with clientTerminated=true.",
       "confidence": "confirmed",
       "security_consequence": ["denial of service via hung connections (SC-5)", "audit records for client-terminated requests carry status undefined"],
       "evidence": [
@@ -692,7 +692,7 @@
       "effort": "S",
       "owner": "Engineering",
       "addresses": ["FM-18", "FM-20"],
-      "evidence": ["docs/installation-and-setup/reverse-proxy.rst:136-140", "docs/installation-and-setup/reverse-proxy.rst:182-185", "api/source/controllers/Operation.js:149-152"]
+      "evidence": ["docs/installation-and-setup/reverse-proxy.rst:136-140", "docs/installation-and-setup/reverse-proxy.rst:182-185", "api/source/controllers/Operation.js:149-152", "api/source/bootstrap/middlewares.js:42-51", "api/source/utils/config.js:62", "api/source/specification/stig-manager.yaml:3870-3874", "api/source/specification/stig-manager.yaml:3886-3892", "api/source/controllers/STIG.js:11-18"]
     },
     {
       "id": "REC-10",
@@ -833,9 +833,9 @@
       "recommendation_id": "REC-09",
       "tooling": "docker compose + nginx with the published D-DIL profile + `tc netem delay 800ms`",
       "setup": "nginx in front of the API using the profile fragment.",
-      "steps": ["`curl -N https://<proxy>/api/op/state/sse` and time the first event.", "Hold the SSE connection for 5 min under 800 ms delay.", "Upload a 50 MB CKL bundle."],
-      "pass": "First SSE event within 2 s; the connection survives 5 min with keep-alives every 30 s; the upload is accepted.",
-      "fail": "First event later than 5 s (client refuses to initialize), connection drops before 5 min, or upload rejected by the proxy."
+      "steps": ["`curl -N https://<proxy>/api/op/state/sse` and time the first event.", "Hold the SSE connection for 5 min under 800 ms delay.", "Through the proxy, `POST /api/stigs?elevate=true` as multipart/form-data with field `importFile` = a valid XCCDF benchmark `.xml` padded with XML comments to about 50 MB (below STIGMAN_API_MAX_UPLOAD, default 1073741824 bytes); this is the one client operation that sends a single large request body, because CKL/CKLB/XCCDF review imports are parsed in the browser and posted as many small JSON review requests. Record the HTTP status and body.", "Control: set the proxy body limit to 10 MB and repeat the same POST."],
+      "pass": "First SSE event within 2 s; the connection survives 5 min with keep-alives every 30 s; the 50 MB importBenchmark request reaches the API and returns the API's own JSON response (200, or a typed 4xx from importBenchmark itself). Control: the 10 MB-limited proxy returns 413 with a non-JSON body, reproducing FM-20.",
+      "fail": "First event later than 5 s (client refuses to initialize), connection drops before 5 min, or the 50 MB request is rejected by the proxy (413 or a proxy HTML page) before reaching the API."
     },
     {
       "id": "LAB-10",

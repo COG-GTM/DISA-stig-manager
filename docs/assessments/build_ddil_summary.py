@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Regenerate the generated sections of ddil-assessment.md from ddil-findings.json.
 
-Every table and every count that appears in the assessment markdown is
-rendered from the JSON so that no number or identifier is hand-typed.
+Every summary count and every identifier-bearing table (dependency matrix,
+failure modes, recommendations, lab plan, Government decisions) is rendered
+from the JSON so that no number or identifier is hand-typed. The narrative
+analysis tables in Sections 5 (authentication) and 6 (audit continuity) are
+hand-authored prose that cite the same evidence; they are outside the marker
+regions and are checked only for evidence-reference validity by the tests.
 Generated regions are delimited by marker comments of the form
 
     <!-- BEGIN GENERATED: <name> -->

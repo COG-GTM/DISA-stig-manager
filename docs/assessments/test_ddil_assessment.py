@@ -16,6 +16,9 @@ The tests assert that
   * every `file:line` or `file:start-end` evidence reference in the JSON and the
     markdown points to an existing file and a line range inside that file;
   * the generated regions of the markdown are current with respect to the JSON.
+
+The evidence checks establish that every cited location exists; they do not
+(and cannot) establish that a cited line supports the claim made about it.
 """
 
 from __future__ import annotations
