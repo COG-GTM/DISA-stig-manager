@@ -140,13 +140,16 @@
       "id": "DEP-08",
       "name": "Container health probe -> API (loopback)",
       "direction": "Orchestrator -> API (localhost)",
-      "protocol_port": "HTTP to localhost:STIGMAN_API_PORT (default 54000), 2 s timeout",
-      "required_at_startup": "N/A (probe only). The probe path /api/op/definition is behind the 503 service check, so the probe fails whenever MySQL or the OIDC provider is unavailable.",
+      "protocol_port": "Plain HTTP only (the probe always uses the http module) to localhost:STIGMAN_API_PORT (default 54000); socket timeout option 2 s. Not wired by a HEALTHCHECK instruction in the Dockerfile; the orchestrator must invoke node healthcheck.js.",
+      "required_at_startup": "N/A (probe only). The probe path /api/op/definition is behind the 503 service check, so the probe fails whenever MySQL or the OIDC provider is unavailable. When native API TLS is enabled (STIGMAN_API_TLS_KEY_FILE and STIGMAN_API_TLS_CERT_FILE both set) the listener is HTTPS-only and the plain-HTTP probe can never succeed.",
       "required_per_request": "N/A.",
       "evidence": [
+        "api/source/healthcheck.js:1",
         "api/source/healthcheck.js:3-8",
         "api/source/healthcheck.js:12-17",
-        "api/source/bootstrap/middlewares.js:61-76"
+        "api/source/bootstrap/server.js:41-49",
+        "api/source/bootstrap/middlewares.js:61-76",
+        "docs/the-project/DockerHub_Readme.md:92-94"
       ]
     }
   ],
@@ -185,13 +188,16 @@
       "id": "FM-03",
       "dependency_id": "DEP-01",
       "condition": "Intermittent",
-      "behavior": "A failed scheduled refresh is retried every 10 s; the stale timer is only armed after a successful update, so the cache remains valid for cacheMaxAge after the last success. Recovery is automatic: the next successful refresh emits cacheUpdate, oidc status returns to true and state returns to 'available'. Unknown kids seen during an outage are cached as 'unknown' sentinels that survive a stale clear and are only removed by a subsequent successful update replacing the cache.",
+      "behavior": "A failed scheduled refresh is retried every 10 s; the stale timer is only armed after a successful update, so the cache remains valid for cacheMaxAge after the last success. Recovery is automatic: the next successful refresh emits cacheUpdate, oidc status returns to true and state returns to 'available'. Unknown kids seen during an outage are cached as 'unknown' sentinels that survive both the stale clear and successful refreshes (clearCacheKeepUnknown runs in both paths); a sentinel is overwritten only when a later successful JWKS fetch publishes that kid (setKey replaces the Map entry). Because a cached sentinel never triggers an on-demand refresh, a token signed with a key that was probed during the outage stays rejected until the next scheduled refresh (up to cacheMaxAge/2, default 5 min) after connectivity returns; a kid that is never published stays rejected until process restart.",
       "confidence": "confirmed",
-      "security_consequence": ["stale-key risk bounded by STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min): a key revoked at the IdP remains trusted until refresh", "IdP key rotation during an outage causes user lockout until connectivity returns"],
+      "security_consequence": ["stale-key risk bounded by STIGMAN_JWKS_CACHE_MAX_AGE (default 10 min): a key revoked at the IdP remains trusted until refresh", "IdP key rotation during an outage causes user lockout until the first scheduled refresh after connectivity returns (not merely until connectivity returns)"],
       "evidence": [
         "api/source/utils/jwksCache.js:54",
         "api/source/utils/jwksCache.js:63-69",
+        "api/source/utils/jwksCache.js:211-217",
+        "api/source/utils/jwksCache.js:40-43",
         "api/source/utils/auth.js:212-214",
+        "api/source/utils/auth.js:51-53",
         "api/source/utils/auth.js:59-62",
         "api/source/utils/config.js:100"
       ]
@@ -527,12 +533,15 @@
       "id": "FM-29",
       "dependency_id": "DEP-08",
       "condition": "Denied",
-      "behavior": "When MySQL or the OIDC provider is unreachable the API is 'unavailable' and /api/op/definition returns 503; the probe exits 1. An orchestrator configured to restart on probe failure will restart the API in a loop for the duration of the dependency outage, each restart re-running the 24x5 s bootstrap and ultimately exiting 1.",
-      "confidence": "confirmed for probe semantics; orchestrator restart behavior is deployment-dependent (inferred)",
-      "security_consequence": ["prolonged availability loss and restart churn (CP-10)", "loss of in-memory JWKS cache and request statistics on every restart", "log volume amplification"],
+      "behavior": "When MySQL or the OIDC provider is unreachable the API is 'unavailable' and /api/op/definition returns 503; the probe exits 1. An orchestrator configured to restart on probe failure will restart the API in a loop for the duration of the dependency outage, each restart re-running the 24x5 s bootstrap and ultimately exiting 1. Independently of dependency state, a deployment with native API TLS enabled presents an HTTPS-only listener while the probe always sends plain HTTP, so every probe fails (exit 1 via the 'error' handler) even when the API is fully healthy; a restart-on-unhealthy orchestrator would then restart a healthy API continuously.",
+      "confidence": "confirmed for probe semantics and the TLS mismatch; orchestrator restart behavior is deployment-dependent (inferred)",
+      "security_consequence": ["prolonged availability loss and restart churn (CP-10)", "loss of in-memory JWKS cache and request statistics on every restart", "log volume amplification", "native TLS (SC-8) and a usable liveness probe are mutually exclusive at the assessed commit"],
       "evidence": [
+        "api/source/healthcheck.js:1",
         "api/source/healthcheck.js:6",
         "api/source/healthcheck.js:12-17",
+        "api/source/healthcheck.js:20-23",
+        "api/source/bootstrap/server.js:41-49",
         "api/source/bootstrap/middlewares.js:64-66",
         "api/source/utils/auth.js:278-287",
         "api/source/utils/state.js:180-184"
@@ -542,10 +551,10 @@
       "id": "FM-30",
       "dependency_id": "DEP-08",
       "condition": "Degraded",
-      "behavior": "The probe has a 2 s timeout; if the API event loop is saturated by slow DB work (FM-06) the probe times out and exits 1, so a degraded-but-functional API may be restarted.",
-      "confidence": "confirmed",
-      "security_consequence": ["false-negative liveness -> restart during load (CP-10, SC-5)"],
-      "evidence": ["api/source/healthcheck.js:7", "api/source/healthcheck.js:20-23"]
+      "behavior": "The probe sets timeout: 2000 but registers no 'timeout' handler and never destroys the request; the option only causes Node to emit a 'timeout' event on socket inactivity, it does not abort the request (inferred: Node http semantics). If the API accepts the connection but never responds (event loop saturated by slow DB work, FM-06), the probe process therefore does not exit after 2 s; it lingers until the socket is closed by another cause or the orchestrator's own probe timeout kills it. Whether a degraded API is then treated as unhealthy depends entirely on the orchestrator's external timeout, not on the 2 s value in the script.",
+      "confidence": "confirmed for the missing handler; inferred for Node timeout-event semantics",
+      "security_consequence": ["liveness outcome under degradation is undefined by the application and delegated to orchestrator defaults (CP-10, SC-5)", "a hung probe process per interval can accumulate if the orchestrator does not enforce its own timeout"],
+      "evidence": ["api/source/healthcheck.js:7", "api/source/healthcheck.js:10-18", "api/source/healthcheck.js:20-23", "api/source/utils/jwksCache.js:165-168"]
     },
     {
       "id": "FM-31",
@@ -655,13 +664,13 @@
       "id": "REC-08",
       "rank": 8,
       "title": "Separate liveness from readiness in the container health probe",
-      "recommendation": "healthcheck.js requests /api/op/definition, which is gated by the 503 service check, so any dependency outage makes the container 'unhealthy' and invites restart loops. Point the liveness probe at /api/op/state (always served) and use the 'available' state only for readiness/traffic routing.",
-      "conditions": ["Denied", "Intermittent"],
-      "nist_controls": ["CP-10", "SC-5"],
+      "recommendation": "healthcheck.js requests /api/op/definition, which is gated by the 503 service check, so any dependency outage makes the container 'unhealthy' and invites restart loops. Point the liveness probe at /api/op/state (always served) and use the 'available' state only for readiness/traffic routing. Make the probe TLS-aware (select https when STIGMAN_API_TLS_KEY_FILE/STIGMAN_API_TLS_CERT_FILE are set, or expose a separate loopback plain-HTTP liveness listener), and add a 'timeout' handler that destroys the request and exits nonzero, following the pattern already used by the JWKS client, so the 2 s budget is actually enforced.",
+      "conditions": ["Denied", "Degraded", "Intermittent"],
+      "nist_controls": ["CP-10", "SC-5", "SC-8"],
       "effort": "S",
       "owner": "Engineering",
       "addresses": ["FM-29", "FM-30", "FM-31"],
-      "evidence": ["api/source/healthcheck.js:6", "api/source/bootstrap/middlewares.js:64-66", "api/source/controllers/Operation.js:115-122"]
+      "evidence": ["api/source/healthcheck.js:1", "api/source/healthcheck.js:6", "api/source/healthcheck.js:7", "api/source/healthcheck.js:20-23", "api/source/bootstrap/server.js:41-49", "api/source/bootstrap/middlewares.js:64-66", "api/source/controllers/Operation.js:115-122", "api/source/utils/jwksCache.js:165-172"]
     },
     {
       "id": "REC-09",
@@ -803,11 +812,11 @@
     {
       "id": "LAB-08",
       "recommendation_id": "REC-08",
-      "tooling": "docker compose with `healthcheck` stanza + `docker stop` on MySQL",
-      "setup": "Compose healthcheck: `node healthcheck.js`, interval 10 s, retries 3; restart: on-failure.",
-      "steps": ["Stop MySQL for 5 min.", "Record API container restart count and `docker inspect` health status."],
-      "pass": "Liveness stays healthy (no restarts); readiness/state reports 'unavailable'; API returns to 'available' within one restore interval (20 s) after MySQL returns.",
-      "fail": "The API container restarts during the outage."
+      "tooling": "docker compose with `healthcheck` stanza, `docker inspect --format '{{json .State.Health}}'`, `docker stop` on MySQL, and a stalled-listener stub (`nc -l` that accepts and never responds)",
+      "setup": "Compose healthcheck for the API service: `test: [\"CMD\", \"node\", \"healthcheck.js\"]`, interval 10 s, timeout 5 s, retries 3, start_period 120 s. Compose restart policies act only on container exit, not on health status, so restart churn is observed indirectly: record Health.Status / Health.FailingStreak transitions from `docker inspect` (or `docker events --filter event=health_status`) as the signal an orchestrator would act on. Prepare a second API service with STIGMAN_API_TLS_KEY_FILE and STIGMAN_API_TLS_CERT_FILE set.",
+      "steps": ["Case A (dependency outage): stop MySQL for 5 min; sample `docker inspect` Health every 10 s.", "Case B (native TLS): start the TLS-enabled API with MySQL and the IdP healthy; run `docker exec <api> node healthcheck.js; echo $?` five times.", "Case C (stalled listener): run `node healthcheck.js` with STIGMAN_API_PORT pointed at a stub that accepts the TCP connection and never writes a response; time how long the process lives (bound the run with `timeout 60`)."],
+      "pass": "Case A: Health.Status stays 'healthy' for the whole outage while /api/op/state reports 'unavailable', and the API returns to 'available' within one restore interval (20 s) after MySQL returns. Case B: exit code 0 on all five runs. Case C: the probe exits nonzero on its own within 2 s (+/- 0.5 s) without external kill.",
+      "fail": "Case A: Health.Status becomes 'unhealthy' (FailingStreak >= retries) during the outage. Case B: any nonzero exit while the API is healthy. Case C: the process is still alive at 3 s or is terminated only by the external `timeout`."
     },
     {
       "id": "LAB-09",
