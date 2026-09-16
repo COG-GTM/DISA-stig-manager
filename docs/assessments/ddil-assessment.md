@@ -179,7 +179,7 @@ Owner "Government decision" indicates the item cannot be closed by engineering a
 
 ## 8. Lab test plan
 
-All tests use local tooling only: `docker compose` (MySQL 8.0.24 or later, an OIDC provider such as Keycloak or the repository's mock at `test/api/mock-keycloak/`, the API image), [toxiproxy](https://github.com/Shopify/toxiproxy) for per-link latency/timeout/reset toxics, and `tc qdisc ... netem` for delay/loss/rate shaping on container interfaces. The existing `test/state/` suite already exercises the **Denied** case for OIDC and MySQL (stop/restart of each dependency, unknown-kid rejection, and the 24-retry exit path) and can be extended with the cases below; no test in this plan requires infrastructure outside the local host, and none was executed as part of this assessment.
+All tests use local tooling only: `docker compose` (MySQL 8.0.24 or later, an OIDC provider such as Keycloak or the repository's mock at `test/api/mock-keycloak/`, the API image), toxiproxy for per-link latency/timeout/reset toxics, and `tc qdisc ... netem` for delay/loss/rate shaping on container interfaces. The existing `test/state/` suite already exercises the **Denied** case for OIDC and MySQL (stop/restart of each dependency, unknown-kid rejection, and the 24-retry exit path) and can be extended with the cases below; no test in this plan requires infrastructure outside the local host, and none was executed as part of this assessment.
 
 Reference baseline (existing coverage):
 
