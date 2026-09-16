@@ -306,13 +306,17 @@
       "id": "FM-10",
       "dependency_id": "DEP-03",
       "condition": "Degraded",
-      "behavior": "The refresh is attempted exactly once, 10 s before exp, with the browser default fetch timeout (no AbortController). If the round trip exceeds the 10 s buffer the new token arrives after the old one expired; in the gap XHRs are not sent (token cleared at timer fire). If the fetch ultimately errors, tokens are cleared and re-authentication is required even though the refresh token was still valid.",
+      "behavior": "The refresh is attempted exactly once, 10 s before exp, with the browser default fetch timeout (no AbortController). At timer fire clearAccessToken() nulls only the worker's internal copy and does not broadcast noToken, so the page keeps its last broadcast token (init.js updates window.oidcWorker.token only from worker broadcasts) and continues to send it. If the round trip exceeds the 10 s buffer, requests issued after exp still carry the old token and are rejected by the API with 401 AuthorizeError (jwt.verify, no clockTolerance); requests are not withheld during the refresh. If the fetch ultimately errors, clearTokens(true) broadcasts noToken and re-authentication is required even though the refresh token was still valid.",
       "confidence": "confirmed for buffer and single attempt; inferred for browser fetch timeout",
-      "security_consequence": ["unnecessary re-authentication under high latency", "brief request blackout each refresh cycle"],
+      "security_consequence": ["unnecessary re-authentication under high latency", "expired bearer tokens are presented to the API during a slow refresh and correctly rejected (401), surfacing as errors on user actions rather than a silent gap"],
       "evidence": [
         "client/src/js/workers/oidc-worker.js:334",
         "client/src/js/workers/oidc-worker.js:346",
         "client/src/js/workers/oidc-worker.js:315-320",
+        "client/src/js/workers/oidc-worker.js:513-517",
+        "client/src/js/init.js:46-57",
+        "client/src/js/SM/Ajax.js:192",
+        "api/source/utils/auth.js:74-81",
         "client/src/js/workers/oidc-worker.js:532-536",
         "client/src/js/workers/oidc-worker.js:568-571"
       ]
@@ -375,12 +379,16 @@
       "id": "FM-15",
       "dependency_id": "DEP-04",
       "condition": "Intermittent",
-      "behavior": "Each XHR is fire-once; requestPromise rejects with ExtRequestError and the caller shows an error dialog. Bulk import issues one POST per asset sequentially with no retry or idempotency key; a mid-batch failure leaves earlier assets committed and later assets processed, with only the UI status grid recording which failed. Review PATCH/POST are individually transactional server-side. SSE auto-reconnects every 3 s.",
+      "behavior": "Each XHR is fire-once; requestPromise rejects with ExtRequestError and the caller shows an error dialog. Bulk import issues one POST per asset sequentially with no retry or idempotency key; a mid-batch failure leaves earlier assets committed and later assets processed. The failure path only raises a transient SM.Error dialog and continues; updateStatusGrid is called solely on success, and a failed importAsset is caught inside that function, so the status grid carries no row for the failed asset and there is no consolidated record of which assets failed. Review PATCH/POST are individually transactional server-side. SSE auto-reconnects every 3 s.",
       "confidence": "confirmed",
       "security_consequence": ["partial-import data-integrity risk", "error dialogs include the server response body (which for 500s includes a stack trace)"],
       "evidence": [
         "client/src/js/overrides.js:272-300",
         "client/src/js/SM/ReviewsImport.js:2394-2428",
+        "client/src/js/SM/ReviewsImport.js:2401",
+        "client/src/js/SM/ReviewsImport.js:2418",
+        "client/src/js/SM/ReviewsImport.js:2421-2423",
+        "client/src/js/SM/ReviewsImport.js:2482-2484",
         "client/src/js/SM/ReviewsImport.js:2466-2484",
         "client/src/js/SM/Error.js:17-35",
         "api/source/bootstrap/errorHandlers.js:20-21",
@@ -620,7 +628,7 @@
       "effort": "M",
       "owner": "Government decision (policy) + Engineering (implementation)",
       "addresses": ["FM-01", "FM-03"],
-      "evidence": ["api/source/utils/config.js:100", "api/source/utils/jwksCache.js:14-15", "api/source/utils/auth.js:209-215", "api/source/utils/auth.js:55", "api/source/utils/jwksCache.js:47-55", "api/source/bootstrap/middlewares.js:22-31"]
+      "evidence": ["api/source/utils/config.js:100", "api/source/utils/jwksCache.js:14-15", "api/source/utils/auth.js:209-215", "api/source/utils/auth.js:55", "api/source/utils/jwksCache.js:47-55", "api/source/bootstrap/middlewares.js:22-31", "api/source/utils/auth.js:200-219"]
     },
     {
       "id": "REC-04",
@@ -778,8 +786,8 @@
       "id": "LAB-03",
       "recommendation_id": "REC-03",
       "tooling": "docker compose + `docker stop` on the IdP; existing test/state harness pattern",
-      "setup": "STIGMAN_JWKS_CACHE_MAX_AGE set to the approved window (e.g., 60). Two tokens: A signed with a kid the API has cached, B signed with a second key that is present on the IdP but was never fetched by the API (add the key to the mock JWKS after the API's last refresh, or use test/utils/mockOidc.js with a second kid).",
-      "steps": ["Run 1 (scheduled path): obtain token A; stop the IdP container.", "Call an authenticated endpoint with A every 30 s and record the first 503.", "Restart the IdP and record time to 'available' via /api/op/state.", "Run 2 (on-demand path): restart the API; obtain A and B; stop the IdP; immediately present B once (expect 401 SigningKeyNotFoundError) so getSigningKey runs refreshCache(false) while the IdP is down.", "Continue calling with A every 30 s; record the first 503.", "Restart the IdP; poll /api/op/state for at least 3 x STIGMAN_JWKS_CACHE_MAX_AGE and record whether 'available' returns without an API restart."],
+      "setup": "STIGMAN_JWKS_CACHE_MAX_AGE set to the approved window (e.g., 60). Two signing keys: A, published at the IdP when the API starts (so it is cached by setupJwks), and B, added to the IdP's JWKS only after the API has started and before its next scheduled refresh (cacheMaxAge/2), so B is present at the IdP but absent from the API cache. Verify the precondition from the jwksCacheEvent debug log (kids list at startup shows only A); do not present B while the IdP is up, because that on-demand refresh would cache B and defeat run 2.",
+      "steps": ["Run 1 (scheduled path): obtain token A; stop the IdP container.", "Call an authenticated endpoint with A every 30 s and record the first 503.", "Restart the IdP and record time to 'available' via /api/op/state.", "Run 2 (on-demand path): restart the API while only key A is published; obtain token A. Publish key B at the IdP and mint token B without waiting for a scheduled API refresh (well inside cacheMaxAge/2). Stop the IdP. Present B once (expect 401 SigningKeyNotFoundError) so getSigningKey runs refreshCache(false) against the unreachable IdP.", "Continue calling with A every 30 s; record the first 503.", "Restart the IdP; poll /api/op/state for at least 3 x STIGMAN_JWKS_CACHE_MAX_AGE and record whether 'available' returns without an API restart."],
       "pass": "In both runs 503 begins only after the approved window elapses, tokens with unknown kids are rejected throughout, and recovery to 'available' occurs within one refresh interval (<= 10 s retry) after the IdP returns without restarting the API. (At the assessed commit run 2 is expected to fail: no JWKS request remains scheduled after the failed on-demand refresh, so 503 persists until restart.)",
       "fail": "503 occurs earlier than the window, recovery in either run requires an API restart, or any unknown-kid token is accepted."
     },
