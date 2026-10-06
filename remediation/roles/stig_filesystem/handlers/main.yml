@@ -1,0 +1,7 @@
+---
+# Handlers for filesystem protections role
+
+- name: Restart systemd-tmpfiles
+  ansible.builtin.command:
+    cmd: systemd-tmpfiles --create
+  changed_when: true

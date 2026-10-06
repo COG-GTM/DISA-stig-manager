@@ -1,0 +1,7 @@
+---
+# Handlers for authentication role
+
+- name: Rebuild authselect profile
+  ansible.builtin.command:
+    cmd: authselect apply-changes
+  changed_when: true

@@ -1,0 +1,257 @@
+---
+# DISA RHEL 9 STIG - SSH Hardening Remediation
+# Controls: SC-8, SC-13, AC-17(2), IA-7, AC-8
+# Rule IDs: DISA RHEL 9 STIG V2R5 (U_RHEL_9_STIG_V2R5); see each task name
+
+# --- FIPS Crypto Configuration ---
+
+- name: V-257989 | CAT II | AC-17(2) | Restrict SSH to FIPS-validated ciphers
+  ansible.builtin.lineinfile:
+    path: /etc/crypto-policies/back-ends/opensshserver.config
+    regexp: '^Ciphers'
+    line: "Ciphers {{ stig_ssh_ciphers | join(',') }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart sshd
+  tags: [V-257989, cat2, ac-17(2)]
+
+- name: V-257989 | CAT II | AC-17(2) | Set SSH ciphers in sshd_config
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^Ciphers'
+    line: "Ciphers {{ stig_ssh_ciphers | join(',') }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257989, cat2, ac-17(2)]
+
+- name: V-257991 | CAT II | AC-17(2) | Set SSH MACs
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^MACs'
+    line: "MACs {{ stig_ssh_macs | join(',') }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257991, cat2, ac-17(2)]
+
+- name: SUPPLEMENTAL | SC-8 | Set SSH key exchange algorithms
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^KexAlgorithms'
+    line: "KexAlgorithms {{ stig_ssh_kex_algorithms | join(',') }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [supplemental, sc-8]
+
+# --- Session Management ---
+
+- name: V-257996 | CAT II | SC-10, AC-12, MA-4(7) | Set ClientAliveInterval
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^ClientAliveInterval'
+    line: "ClientAliveInterval {{ stig_ssh_client_alive_interval }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257996, cat2, sc-10, ac-12, ma-4(7)]
+
+- name: V-257995 | CAT II | SC-10, AC-12 | Set ClientAliveCountMax
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^ClientAliveCountMax'
+    line: "ClientAliveCountMax {{ stig_ssh_client_alive_count_max }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257995, cat2, sc-10, ac-12]
+
+- name: SUPPLEMENTAL | AC-17(2) | Set LoginGraceTime
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^LoginGraceTime'
+    line: "LoginGraceTime {{ stig_ssh_login_grace_time }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [supplemental, ac-17]
+
+- name: SUPPLEMENTAL | AC-7 | Set MaxAuthTries
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^MaxAuthTries'
+    line: "MaxAuthTries {{ stig_ssh_max_auth_tries }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [supplemental, ac-7]
+
+# --- Access Controls ---
+
+- name: V-257985 | CAT II | IA-2(5) | Disable root login via SSH
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PermitRootLogin'
+    line: "PermitRootLogin {{ stig_ssh_permit_root_login }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257985, cat2, ia-2(5)]
+
+- name: V-257984 | CAT I | IA-2(2) | Disable empty passwords
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PermitEmptyPasswords'
+    line: "PermitEmptyPasswords {{ stig_ssh_permit_empty_passwords }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257984, cat1, ia-2(2)]
+
+- name: V-257993 | CAT II | CM-6 | Disable user environment processing
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^PermitUserEnvironment'
+    line: "PermitUserEnvironment {{ stig_ssh_permit_user_environment }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257993, cat2, cm-6]
+
+- name: V-257986 | CAT I | MA-4 | Enable PAM
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^UsePAM'
+    line: "UsePAM {{ stig_ssh_use_pam }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257986, cat1, ma-4]
+
+- name: V-258007 | CAT II | CM-6 | Disable X11 forwarding
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^X11Forwarding'
+    line: "X11Forwarding {{ stig_ssh_x11_forwarding }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-258007, cat2, cm-6]
+
+- name: V-258002 | CAT II | CM-6 | Set compression to delayed
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^Compression'
+    line: "Compression {{ stig_ssh_compression }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-258002, cat2, cm-6]
+
+- name: V-257992 | CAT II | CM-6 | Disable host-based authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^HostbasedAuthentication'
+    line: "HostbasedAuthentication {{ stig_ssh_hostbased_auth }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257992, cat2, cm-6]
+
+- name: V-258008 | CAT II | CM-6 | Enable strict mode
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^StrictModes'
+    line: "StrictModes {{ stig_ssh_strict_modes }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-258008, cat2, cm-6]
+
+# --- Banner ---
+
+- name: V-257981 | CAT II | AC-8 | Set SSH banner
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^Banner'
+    line: "Banner {{ stig_ssh_banner }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257981, cat2, ac-8]
+
+- name: V-257981 | CAT II | AC-8 | Deploy DoD consent banner
+  ansible.builtin.copy:
+    dest: "{{ stig_ssh_banner }}"
+    content: |
+      You are accessing a U.S. Government (USG) Information System (IS) that is
+      provided for USG-authorized use only.
+
+      By using this IS (which includes any device attached to this IS), you consent
+      to the following conditions:
+
+      -The USG routinely intercepts and monitors communications on this IS for
+      purposes including, but not limited to, penetration testing, COMSEC monitoring,
+      network operations and defense, personnel misconduct (PM), law enforcement
+      (LE), and counterintelligence (CI) investigations.
+
+      -At any time, the USG may inspect and seize data stored on this IS.
+
+      -Communications using, or data stored on, this IS are not private, are subject
+      to routine monitoring, interception, and search, and may be disclosed or used
+      for any USG-authorized purpose.
+
+      -This IS includes security measures (e.g., authentication and access controls)
+      to protect USG interests--not for your personal benefit or privacy.
+
+      -Notwithstanding the above, using this IS does not constitute consent to PM,
+      LE or CI investigative searching or monitoring of the content of privileged
+      communications, or work product, related to personal representation or services
+      by attorneys, psychotherapists, or clergy, and their assistants. Such
+      communications and work product are private and confidential. See User
+      Agreement for details.
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [V-257981, cat2, ac-8]
+
+# --- Rekey Limit ---
+
+- name: V-257994 | CAT II | AC-17(2), SC-8, SC-8(1) | Set RekeyLimit
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^RekeyLimit'
+    line: "RekeyLimit {{ stig_ssh_rekey_limit }}"
+  notify:
+    - Validate sshd config
+    - Restart sshd
+  tags: [V-257994, cat2, ac-17(2), sc-8, sc-8(1)]
+
+# --- Verification tasks ---
+
+- name: Verify | SSHD config syntax is valid
+  ansible.builtin.command:
+    cmd: sshd -t
+  register: verify_sshd_config
+  changed_when: false
+  failed_when: verify_sshd_config.rc != 0
+  tags: [verify, V-257989, cat2, ac-17(2)]
+
+- name: Verify | Root login is disabled
+  ansible.builtin.command:
+    cmd: grep -c "^PermitRootLogin no" /etc/ssh/sshd_config
+  register: verify_no_root
+  changed_when: false
+  failed_when: verify_no_root.rc != 0
+  tags: [verify, V-257985, cat2, ia-2(5)]
+
+- name: Verify | FIPS ciphers are configured
+  ansible.builtin.command:
+    cmd: grep -c "^Ciphers" /etc/ssh/sshd_config
+  register: verify_ciphers
+  changed_when: false
+  failed_when: verify_ciphers.rc != 0
+  tags: [verify, V-257989, cat2, ac-17(2)]

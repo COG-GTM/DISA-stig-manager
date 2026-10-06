@@ -1,0 +1,94 @@
+---
+# DISA RHEL 9 STIG - Kernel Hardening Defaults
+# NIST 800-53: CM-6, SC-7, SI-16
+
+# Sysctl parameters mapped to STIG requirements
+stig_kernel_params:
+  # V-257809: Enable ASLR
+  kernel.randomize_va_space: 2
+
+  # V-257800: Restrict kernel pointer exposure
+  kernel.kptr_restrict: 1
+
+  # V-257797: Restrict dmesg access
+  kernel.dmesg_restrict: 1
+
+  # V-257798: Restrict kernel perf events
+  kernel.perf_event_paranoid: 2
+
+  # supplemental (no RHEL 9 V2R5 rule): Disable core dumps for SUID programs
+  fs.suid_dumpable: 0
+
+  # V-257970: Disable IPv4 forwarding (non-routers)
+  net.ipv4.ip_forward: 0
+
+  # V-257959/V-257964: Disable IPv4 source routing
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+
+  # V-257958/V-257963: Disable ICMP redirects
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+
+  # V-257968/V-257969: Disable ICMP redirect sending
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+
+  # V-257957: Enable TCP SYN cookies
+  net.ipv4.tcp_syncookies: 1
+
+  # V-257962/V-257965: Enable reverse path filtering
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+
+  # V-257960/V-257961: Log martian packets
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.conf.default.log_martians: 1
+
+  # V-257966: Ignore ICMP broadcast requests
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+
+  # V-257967: Ignore bogus ICMP errors
+  net.ipv4.icmp_ignore_bogus_error_responses: 1
+
+  # V-257971/V-257975: Disable IPv6 router advertisements
+  net.ipv6.conf.all.accept_ra: 0
+  net.ipv6.conf.default.accept_ra: 0
+
+  # V-257972/V-257976: Disable IPv6 redirects
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+
+  # V-257973/V-257977: Disable IPv6 source routing
+  net.ipv6.conf.all.accept_source_route: 0
+  net.ipv6.conf.default.accept_source_route: 0
+
+# Kernel modules to disable
+stig_disabled_modules:
+  # V-258034: Disable USB storage
+  - usb-storage
+  # V-258039: Disable Bluetooth
+  - bluetooth
+  # V-257806: Disable FireWire
+  - firewire-core
+  # supplemental (no RHEL 9 V2R5 rule): Disable DCCP
+  - dccp
+  # V-257807: Disable SCTP
+  - sctp
+  # V-257808: Disable TIPC
+  - tipc
+  # V-257880: Disable cramfs
+  - cramfs
+  # supplemental (no RHEL 9 V2R5 rule): Disable freevxfs
+  - freevxfs
+  # supplemental (no RHEL 9 V2R5 rule): Disable hfs
+  - hfs
+  # supplemental (no RHEL 9 V2R5 rule): Disable hfsplus
+  - hfsplus
+  # supplemental (no RHEL 9 V2R5 rule): Disable squashfs
+  - squashfs
+  # supplemental (no RHEL 9 V2R5 rule): Disable udf
+  - udf
+
+# V-257814: Core dump limits
+stig_disable_core_dumps: true

@@ -1,0 +1,140 @@
+---
+# DISA RHEL 9 STIG - Session Security Remediation
+# Controls: AC-11, AC-11(1), AC-12
+# Rule IDs: DISA RHEL 9 STIG V2R5 (U_RHEL_9_STIG_V2R5); see each task name
+
+- name: SUPPLEMENTAL | AC-11 | Ensure tmux is installed for session locking
+  ansible.builtin.dnf:
+    name: tmux
+    state: present
+  tags: [supplemental, ac-11]
+
+- name: SUPPLEMENTAL | AC-11(1) | Configure tmux to lock session after inactivity
+  ansible.builtin.lineinfile:
+    path: /etc/tmux.conf
+    regexp: '^set -g lock-after-time'
+    line: "set -g lock-after-time {{ stig_session_lock_timeout }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [supplemental, ac-11]
+
+- name: SUPPLEMENTAL | AC-11(1) | Configure tmux lock command
+  ansible.builtin.lineinfile:
+    path: /etc/tmux.conf
+    regexp: '^set -g lock-command'
+    line: "set -g lock-command {{ stig_tmux_lock_command }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [supplemental, ac-11]
+
+- name: SUPPLEMENTAL | AC-11 | Ensure tmux launches on all interactive shells
+  ansible.builtin.copy:
+    dest: /etc/profile.d/tmux.sh
+    content: |
+      # DISA STIG supplemental (no RHEL 9 V2R5 rule): Force tmux for all interactive sessions
+      if [ -z "$TMUX" ] && [ -n "$PS1" ] && [ "$TERM" != "screen" ]; then
+        exec tmux new-session -A -s main
+      fi
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [supplemental, ac-11]
+
+- name: V-258068 | CAT II | AC-11, SC-10 | Set TMOUT for CLI session timeout
+  ansible.builtin.copy:
+    dest: /etc/profile.d/stig-timeout.sh
+    content: |
+      # DISA STIG V-258068: Automatic logout after idle period
+      TMOUT={{ stig_cli_timeout }}
+      readonly TMOUT
+      export TMOUT
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [V-258068, cat2, ac-11, sc-10]
+
+- name: V-258069 | CAT III | AC-10 | Limit concurrent sessions per user
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.d/99-stig-maxlogins.conf
+    regexp: '^\*\s+hard\s+maxlogins'
+    line: "*               hard    maxlogins       {{ stig_max_concurrent_sessions }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [V-258069, cat3, ac-10]
+
+- name: V-258021, V-258023 | CAT II | AC-11, AC-11(1) | Configure GNOME screensaver lock (if GNOME installed)
+  tags: [V-258021, V-258023, cat2, ac-11, ac-11(1)]
+  block:
+    - name: Check if GNOME is installed
+      ansible.builtin.command:
+        cmd: rpm -q gnome-session
+      register: gnome_check
+      changed_when: false
+      failed_when: false
+
+    - name: Create dconf lock directory
+      ansible.builtin.file:
+        path: /etc/dconf/db/local.d/locks
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: gnome_check.rc == 0
+
+    - name: Set GNOME screensaver idle delay
+      ansible.builtin.copy:
+        dest: /etc/dconf/db/local.d/00-screensaver
+        content: |
+          [org/gnome/desktop/session]
+          idle-delay=uint32 {{ stig_session_lock_timeout }}
+
+          [org/gnome/desktop/screensaver]
+          lock-enabled=true
+          lock-delay=uint32 {{ stig_session_lock_delay }}
+        owner: root
+        group: root
+        mode: "0644"
+      when: gnome_check.rc == 0
+      notify: Reload dconf
+
+    - name: Lock GNOME screensaver settings
+      ansible.builtin.copy:
+        dest: /etc/dconf/db/local.d/locks/session
+        content: |
+          /org/gnome/desktop/session/idle-delay
+          /org/gnome/desktop/screensaver/lock-enabled
+          /org/gnome/desktop/screensaver/lock-delay
+        owner: root
+        group: root
+        mode: "0644"
+      when: gnome_check.rc == 0
+      notify: Reload dconf
+
+- name: SUPPLEMENTAL | AC-11(1) | Ensure vlock is installed for console locking
+  ansible.builtin.dnf:
+    name: kbd
+    state: present
+  tags: [supplemental, ac-11]
+
+# Verification tasks
+- name: Verify | Session lock timeout configured
+  ansible.builtin.command:
+    cmd: grep -c "lock-after-time" /etc/tmux.conf
+  register: verify_tmux_lock
+  changed_when: false
+  failed_when: verify_tmux_lock.rc != 0
+  tags: [verify, supplemental]
+
+- name: Verify | TMOUT is set
+  ansible.builtin.command:
+    cmd: grep -c "TMOUT" /etc/profile.d/stig-timeout.sh
+  register: verify_tmout
+  changed_when: false
+  failed_when: verify_tmout.rc != 0
+  tags: [verify, V-258068, cat2, ac-11, sc-10]
