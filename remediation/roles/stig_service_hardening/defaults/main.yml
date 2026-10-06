@@ -2,7 +2,7 @@
 # DISA RHEL 9 STIG - Service Hardening Defaults
 # NIST 800-53: CM-7, CM-6, AU-8
 
-# V-258120: Services that must be disabled
+# supplemental (no RHEL 9 V2R5 rule): Services that must be disabled
 stig_disabled_services:
   - autofs
   - avahi-daemon
@@ -21,32 +21,32 @@ stig_disabled_services:
   - vsftpd
   - xinetd
 
-# V-258121: Services that must be enabled
+# V-257936/V-257944/V-258152/V-258142: Services that must be enabled
 stig_enabled_services:
   - firewalld
   - chronyd
   - auditd
   - rsyslog
 
-# V-258125: Chrony NTP configuration
+# V-257945: Chrony NTP configuration
 stig_chrony_servers:
   - 0.rhel.pool.ntp.org iburst
   - 1.rhel.pool.ntp.org iburst
   - 2.rhel.pool.ntp.org iburst
   - 3.rhel.pool.ntp.org iburst
 
-# V-258126: Chrony must run as chrony user
+# supplemental (no RHEL 9 V2R5 rule): Chrony must run as chrony user
 stig_chrony_user: chrony
 
-# V-258130: Default firewalld zone
+# V-257937: Default firewalld zone
 stig_firewalld_default_zone: drop
 
-# V-258131: Firewalld allowed services (adjust per mission need)
+# V-257937: Firewalld allowed services (adjust per mission need)
 stig_firewalld_allowed_services:
   - ssh
 
-# V-258135: Disable ctrl-alt-del reboot target
+# V-257785: Disable ctrl-alt-del reboot target
 stig_disable_ctrl_alt_del: true
 
-# V-258136: Emergency mode requires root password
+# V-257784: Emergency mode requires root password
 stig_emergency_auth: true

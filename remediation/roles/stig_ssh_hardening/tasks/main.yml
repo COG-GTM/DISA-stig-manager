@@ -1,11 +1,11 @@
 ---
 # DISA RHEL 9 STIG - SSH Hardening Remediation
 # Controls: SC-8, SC-13, AC-17(2), IA-7, AC-8
-# Covers: V-258015 through V-258045
+# Rule IDs: DISA RHEL 9 STIG V2R5 (U_RHEL_9_STIG_V2R5); see each task name
 
 # --- FIPS Crypto Configuration ---
 
-- name: V-258015 | CAT I | SC-8 | Restrict SSH to FIPS-validated ciphers
+- name: V-257989 | CAT II | AC-17(2) | Restrict SSH to FIPS-validated ciphers
   ansible.builtin.lineinfile:
     path: /etc/crypto-policies/back-ends/opensshserver.config
     regexp: '^Ciphers'
@@ -15,9 +15,9 @@
     group: root
     mode: "0644"
   notify: Restart sshd
-  tags: [V-258015, cat1, sc-8, sc-13]
+  tags: [V-257989, cat2, ac-17(2)]
 
-- name: V-258016 | CAT I | SC-8 | Set SSH ciphers in sshd_config
+- name: V-257989 | CAT II | AC-17(2) | Set SSH ciphers in sshd_config
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^Ciphers'
@@ -25,9 +25,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258016, cat1, sc-8]
+  tags: [V-257989, cat2, ac-17(2)]
 
-- name: V-258017 | CAT I | SC-8 | Set SSH MACs
+- name: V-257991 | CAT II | AC-17(2) | Set SSH MACs
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^MACs'
@@ -35,9 +35,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258017, cat1, sc-8]
+  tags: [V-257991, cat2, ac-17(2)]
 
-- name: V-258018 | CAT I | SC-8 | Set SSH key exchange algorithms
+- name: SUPPLEMENTAL | SC-8 | Set SSH key exchange algorithms
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^KexAlgorithms'
@@ -45,11 +45,11 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258018, cat1, sc-8]
+  tags: [supplemental, sc-8]
 
 # --- Session Management ---
 
-- name: V-258019 | CAT II | SC-10 | Set ClientAliveInterval
+- name: V-257996 | CAT II | SC-10, AC-12, MA-4(7) | Set ClientAliveInterval
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^ClientAliveInterval'
@@ -57,9 +57,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258019, cat2, sc-10]
+  tags: [V-257996, cat2, sc-10, ac-12, ma-4(7)]
 
-- name: V-258020 | CAT II | SC-10 | Set ClientAliveCountMax
+- name: V-257995 | CAT II | SC-10, AC-12 | Set ClientAliveCountMax
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^ClientAliveCountMax'
@@ -67,9 +67,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258020, cat2, sc-10]
+  tags: [V-257995, cat2, sc-10, ac-12]
 
-- name: V-258021 | CAT II | AC-17(2) | Set LoginGraceTime
+- name: SUPPLEMENTAL | AC-17(2) | Set LoginGraceTime
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^LoginGraceTime'
@@ -77,9 +77,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258021, cat2, ac-17]
+  tags: [supplemental, ac-17]
 
-- name: V-258022 | CAT II | AC-7 | Set MaxAuthTries
+- name: SUPPLEMENTAL | AC-7 | Set MaxAuthTries
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^MaxAuthTries'
@@ -87,11 +87,11 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258022, cat2, ac-7]
+  tags: [supplemental, ac-7]
 
 # --- Access Controls ---
 
-- name: V-258023 | CAT I | AC-6(2) | Disable root login via SSH
+- name: V-257985 | CAT II | IA-2(5) | Disable root login via SSH
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^PermitRootLogin'
@@ -99,9 +99,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258023, cat1, ac-6]
+  tags: [V-257985, cat2, ia-2(5)]
 
-- name: V-258024 | CAT I | IA-5(1) | Disable empty passwords
+- name: V-257984 | CAT I | IA-2(2) | Disable empty passwords
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^PermitEmptyPasswords'
@@ -109,9 +109,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258024, cat1, ia-5]
+  tags: [V-257984, cat1, ia-2(2)]
 
-- name: V-258025 | CAT II | CM-6 | Disable user environment processing
+- name: V-257993 | CAT II | CM-6 | Disable user environment processing
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^PermitUserEnvironment'
@@ -119,9 +119,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258025, cat2, cm-6]
+  tags: [V-257993, cat2, cm-6]
 
-- name: V-258026 | CAT II | CM-6 | Enable PAM
+- name: V-257986 | CAT I | MA-4 | Enable PAM
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^UsePAM'
@@ -129,9 +129,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258026, cat2, cm-6]
+  tags: [V-257986, cat1, ma-4]
 
-- name: V-258027 | CAT II | CM-6 | Disable X11 forwarding
+- name: V-258007 | CAT II | CM-6 | Disable X11 forwarding
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^X11Forwarding'
@@ -139,9 +139,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258027, cat2, cm-6]
+  tags: [V-258007, cat2, cm-6]
 
-- name: V-258028 | CAT II | CM-6 | Set compression to delayed
+- name: V-258002 | CAT II | CM-6 | Set compression to delayed
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^Compression'
@@ -149,9 +149,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258028, cat2, cm-6]
+  tags: [V-258002, cat2, cm-6]
 
-- name: V-258029 | CAT II | CM-6 | Disable host-based authentication
+- name: V-257992 | CAT II | CM-6 | Disable host-based authentication
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^HostbasedAuthentication'
@@ -159,9 +159,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258029, cat2, cm-6]
+  tags: [V-257992, cat2, cm-6]
 
-- name: V-258030 | CAT II | AC-6 | Enable strict mode
+- name: V-258008 | CAT II | CM-6 | Enable strict mode
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^StrictModes'
@@ -169,11 +169,11 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258030, cat2, ac-6]
+  tags: [V-258008, cat2, cm-6]
 
 # --- Banner ---
 
-- name: V-258031 | CAT II | AC-8 | Set SSH banner
+- name: V-257981 | CAT II | AC-8 | Set SSH banner
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^Banner'
@@ -181,9 +181,9 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258031, cat2, ac-8]
+  tags: [V-257981, cat2, ac-8]
 
-- name: V-258031 | CAT II | AC-8 | Deploy DoD consent banner
+- name: V-257981 | CAT II | AC-8 | Deploy DoD consent banner
   ansible.builtin.copy:
     dest: "{{ stig_ssh_banner }}"
     content: |
@@ -216,11 +216,11 @@
     owner: root
     group: root
     mode: "0644"
-  tags: [V-258031, cat2, ac-8]
+  tags: [V-257981, cat2, ac-8]
 
 # --- Rekey Limit ---
 
-- name: V-258032 | CAT II | SC-8 | Set RekeyLimit
+- name: V-257994 | CAT II | AC-17(2), SC-8, SC-8(1) | Set RekeyLimit
   ansible.builtin.lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^RekeyLimit'
@@ -228,7 +228,7 @@
   notify:
     - Validate sshd config
     - Restart sshd
-  tags: [V-258032, cat2, sc-8]
+  tags: [V-257994, cat2, ac-17(2), sc-8, sc-8(1)]
 
 # --- Verification tasks ---
 
@@ -238,7 +238,7 @@
   register: verify_sshd_config
   changed_when: false
   failed_when: verify_sshd_config.rc != 0
-  tags: [verify, V-258015]
+  tags: [verify, V-257989, cat2, ac-17(2)]
 
 - name: Verify | Root login is disabled
   ansible.builtin.command:
@@ -246,7 +246,7 @@
   register: verify_no_root
   changed_when: false
   failed_when: verify_no_root.rc != 0
-  tags: [verify, V-258023]
+  tags: [verify, V-257985, cat2, ia-2(5)]
 
 - name: Verify | FIPS ciphers are configured
   ansible.builtin.command:
@@ -254,4 +254,4 @@
   register: verify_ciphers
   changed_when: false
   failed_when: verify_ciphers.rc != 0
-  tags: [verify, V-258016]
+  tags: [verify, V-257989, cat2, ac-17(2)]

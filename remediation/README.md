@@ -12,18 +12,22 @@ This directory contains production-ready Ansible roles that implement DISA STIG 
 
 ## Coverage Statistics
 
-| Security Domain | Role | V-Numbers | CAT I | CAT II | CAT III | NIST Controls |
-|----------------|------|-----------|-------|--------|---------|---------------|
-| Session Security | `stig_session_security` | V-257844 – V-257851 | 0 | 8 | 0 | AC-11, AC-12, AC-10 |
-| Authentication | `stig_authentication` | V-257876 – V-257895 | 0 | 20 | 0 | IA-5(1), AC-7 |
-| Audit Logging | `stig_audit_logging` | V-257950 – V-257976 | 0 | 27 | 0 | AU-2, AU-3, AU-4, AU-5, AU-9, AU-12 |
-| SSH Hardening | `stig_ssh_hardening` | V-258015 – V-258032 | 4 | 14 | 0 | SC-8, SC-13, AC-17(2), IA-7, AC-8 |
-| Filesystem | `stig_filesystem` | V-258050 – V-258066 | 0 | 17 | 0 | CM-6, AC-6, SI-7 |
-| Kernel Hardening | `stig_kernel_hardening` | V-258080 – V-258113 | 1 | 33 | 0 | CM-6, SC-7, SI-16, CM-7 |
-| Service Hardening | `stig_service_hardening` | V-258120 – V-258141 | 5 | 17 | 0 | CM-7, CM-6, AU-8, SC-7, SI-7 |
+Rule IDs and severities are taken from the DISA **RHEL 9 STIG Version 2, Release 5** XCCDF (`U_RHEL_9_STIG_V2R5_Manual-xccdf.xml`). NIST SP 800-53 Rev. 5 controls are derived from each rule's CCIs via the DISA CCI list. Tasks labelled `SUPPLEMENTAL` are hardening steps with no direct V2R5 rule; they are kept for defense in depth and are not counted as STIG coverage.
 
-**Total:** 141 STIG checks remediated across 7 security domains  
-**CAT I (Critical):** 10 rules | **CAT II (High):** 131 rules
+| Security Domain | Role | STIG Rules | CAT I | CAT II | CAT III | Supplemental Tasks | NIST 800-53 Rev. 5 Controls |
+|----------------|------|-----------|-------|--------|---------|--------------------|-----------------------------|
+| Session Security | `stig_session_security` | 4 | 0 | 3 | 1 | 5 | AC-10, AC-11, AC-11(1), SC-10 |
+| Authentication | `stig_authentication` | 18 | 0 | 18 | 0 | 1 | AC-7, CM-6, IA-5, IA-5(1) |
+| Audit Logging | `stig_audit_logging` | 39 | 0 | 38 | 1 | 2 | AC-2(4), AU-12, AU-14(1), AU-3, AU-3(1), AU-4, AU-5, AU-5(1), AU-6(4), AU-9, SI-11 |
+| SSH Hardening | `stig_ssh_hardening` | 14 | 2 | 12 | 0 | 3 | AC-12, AC-17, AC-17(2), AC-7, AC-8, CM-6, IA-2(2), IA-2(5), MA-4, MA-4(7), SC-10, SC-8, SC-8(1) |
+| Filesystem | `stig_filesystem` | 17 | 0 | 17 | 0 | 2 | CM-3(5), CM-6, CM-7(2), SC-4, SI-6 |
+| Kernel Hardening | `stig_kernel_hardening` | 35 | 1 | 33 | 1 | 0 | AC-17(2), CM-6, CM-7, CM-7(9), IA-3, MA-4, SC-2, SC-4, SC-8, SI-16 |
+| Service Hardening | `stig_service_hardening` | 15 | 5 | 10 | 0 | 3 | AC-17(1), AC-17(9), AC-3, AC-6(10), AU-8, CM-14, CM-6, CM-7, SC-45(1) |
+
+**Total:** 141 distinct RHEL 9 V2R5 rules addressed across 7 security domains, plus 16 supplemental tasks  
+**CAT I (High):** 8 rules | **CAT II (Medium):** 130 rules | **CAT III (Low):** 3 rules
+
+Addressing a rule in this playbook is not the same as passing it. Validate each host with an SCAP scan or STIG checklist review before recording a finding as Not a Finding.
 
 ## Quick Start
 
@@ -53,7 +57,7 @@ ansible-playbook -i inventory/hosts.yml site.yml --check --diff
 # Apply all STIG remediations
 ansible-playbook -i inventory/hosts.yml site.yml
 
-# Apply only CAT I (critical) findings
+# Apply only CAT I (high severity) findings
 ansible-playbook -i inventory/hosts.yml site.yml --tags "cat1"
 
 # Apply only SSH hardening

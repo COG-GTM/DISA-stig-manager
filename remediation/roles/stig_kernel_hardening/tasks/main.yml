@@ -1,11 +1,11 @@
 ---
 # DISA RHEL 9 STIG - Kernel Hardening Remediation
 # Controls: CM-6, SC-7, SI-16, SC-5
-# Covers: V-258080 through V-258115
+# Rule IDs: DISA RHEL 9 STIG V2R5 (U_RHEL_9_STIG_V2R5); see each task name
 
 # --- Sysctl parameters ---
 
-- name: V-258080-V-258096 | CAT II | CM-6 | Apply kernel security parameters
+- name: 24 RHEL 9 V2R5 rules (IDs per item in defaults/main.yml) | CAT II | SI-16, SC-2, SC-4 | Apply kernel security parameters
   ansible.posix.sysctl:
     name: "{{ item.key }}"
     value: "{{ item.value }}"
@@ -14,11 +14,11 @@
     reload: true
     sysctl_file: /etc/sysctl.d/99-stig-hardening.conf
   loop: "{{ stig_kernel_params | dict2items }}"
-  tags: [V-258080, cat2, cm-6, sc-7]
+  tags: [V-257809, V-257800, V-257797, V-257798, V-257970, V-257959, V-257964, V-257958, V-257963, V-257968, V-257969, V-257957, V-257962, V-257965, V-257960, V-257961, V-257966, V-257967, V-257971, V-257975, V-257972, V-257976, V-257973, V-257977, cat2, si-16, sc-2, sc-4]
 
 # --- Disable unnecessary kernel modules ---
 
-- name: V-258097-V-258108 | CAT II | CM-7 | Disable unnecessary kernel modules
+- name: 6 RHEL 9 V2R5 rules (IDs per item in defaults/main.yml) | CAT II | IA-3, CM-7(9), CM-7 | Disable unnecessary kernel modules
   ansible.builtin.copy:
     dest: "/etc/modprobe.d/stig-{{ item }}.conf"
     content: |
@@ -30,60 +30,60 @@
     mode: "0644"
   loop: "{{ stig_disabled_modules }}"
   notify: Update module dependencies
-  tags: [V-258097, cat2, cm-7]
+  tags: [V-258034, V-258039, V-257806, V-257807, V-257808, V-257880, cat2, ia-3, cm-7(9), cm-7]
 
 # --- Core dump restrictions ---
 
-- name: V-258109 | CAT II | CM-6 | Disable core dumps via limits.conf
+- name: V-257814 | CAT II | CM-6 | Disable core dumps via limits.conf
   ansible.builtin.copy:
     dest: /etc/security/limits.d/99-stig-coredump.conf
     content: |
-      # DISA STIG V-258109: Disable core dumps
+      # DISA STIG V-257814: Disable core dumps
       *               hard    core            0
     owner: root
     group: root
     mode: "0644"
   when: stig_disable_core_dumps
-  tags: [V-258109, cat2, cm-6]
+  tags: [V-257814, cat2, cm-6]
 
-- name: V-258110 | CAT II | CM-6 | Disable core dumps via systemd
+- name: V-257813 | CAT II | CM-6 | Disable core dumps via systemd
   ansible.builtin.lineinfile:
     path: /etc/systemd/coredump.conf
     regexp: '^(#\s*)?Storage='
     line: "Storage=none"
     insertafter: '^\[Coredump\]'
   when: stig_disable_core_dumps
-  tags: [V-258110, cat2, cm-6]
+  tags: [V-257813, cat2, cm-6]
 
-- name: V-258111 | CAT II | CM-6 | Set ProcessSizeMax to 0 for coredumps
+- name: V-257812 | CAT II | CM-6 | Set ProcessSizeMax to 0 for coredumps
   ansible.builtin.lineinfile:
     path: /etc/systemd/coredump.conf
     regexp: '^(#\s*)?ProcessSizeMax='
     line: "ProcessSizeMax=0"
     insertafter: '^\[Coredump\]'
   when: stig_disable_core_dumps
-  tags: [V-258111, cat2, cm-6]
+  tags: [V-257812, cat2, cm-6]
 
 # --- FIPS mode ---
 
-- name: V-258112 | CAT I | SC-13 | Check FIPS mode status
+- name: V-258230 | CAT I | AC-17(2), MA-4, SC-8 | Check FIPS mode status
   ansible.builtin.command:
     cmd: fips-mode-setup --check
   register: fips_status
   changed_when: false
   failed_when: false
-  tags: [V-258112, cat1, sc-13]
+  tags: [V-258230, cat1, ac-17(2), ma-4, sc-8]
 
-- name: V-258112 | CAT I | SC-13 | Enable FIPS mode if not active
+- name: V-258230 | CAT I | AC-17(2), MA-4, SC-8 | Enable FIPS mode if not active
   ansible.builtin.command:
     cmd: fips-mode-setup --enable
   when: "'is enabled' not in fips_status.stdout"
   notify: Rebuild initramfs
-  tags: [V-258112, cat1, sc-13]
+  tags: [V-258230, cat1, ac-17(2), ma-4, sc-8]
 
 # --- Restrict ptrace ---
 
-- name: V-258113 | CAT II | CM-6 | Restrict ptrace scope
+- name: V-257811 | CAT II | SC-2 | Restrict ptrace scope
   ansible.posix.sysctl:
     name: kernel.yama.ptrace_scope
     value: "1"
@@ -91,7 +91,7 @@
     state: present
     reload: true
     sysctl_file: /etc/sysctl.d/99-stig-hardening.conf
-  tags: [V-258113, cat2, cm-6]
+  tags: [V-257811, cat2, sc-2]
 
 # --- Verification tasks ---
 
@@ -101,7 +101,7 @@
   register: verify_aslr
   changed_when: false
   failed_when: "'2' not in verify_aslr.stdout"
-  tags: [verify, V-258080]
+  tags: [verify, V-257809]
 
 - name: Verify | Core dumps are disabled
   ansible.builtin.command:
@@ -110,7 +110,7 @@
   changed_when: false
   failed_when: verify_coredump.rc != 0
   when: stig_disable_core_dumps
-  tags: [verify, V-258109]
+  tags: [verify, V-257814, cat2, cm-6]
 
 - name: Verify | USB storage module is blacklisted
   ansible.builtin.command:
@@ -118,4 +118,4 @@
   register: verify_usb
   changed_when: false
   failed_when: verify_usb.rc != 0
-  tags: [verify, V-258097]
+  tags: [verify, V-258034]
