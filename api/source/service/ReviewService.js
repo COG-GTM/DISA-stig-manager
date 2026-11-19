@@ -587,7 +587,13 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
       json_array()
     ) as assetLabels`,
     'r.ruleId',
-    `coalesce(cast(concat('[', group_concat(distinct concat('"',rvcd2.ruleId,'"')), ']') as json), json_array()) as ruleIds`,
+    `(select
+        coalesce(cast(concat('[', group_concat(distinct concat('"',rvcdr.ruleId,'"')), ']') as json), json_array())
+      from
+        rule_version_check_digest rvcdr
+      where
+        rvcdr.version = r.version and rvcdr.checkDigest = r.checkDigest
+    ) as ruleIds`,
     'result.api as "result"',
     'CASE WHEN r.resultEngine = 0 THEN NULL ELSE r.resultEngine END as resultEngine',
     "COALESCE(LEFT(r.detail,32767),'') as detail",
@@ -618,7 +624,6 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
   const joins = [
     'review r',
     'left join rule_version_check_digest rvcd on (r.version = rvcd.version and r.checkDigest = rvcd.checkDigest)',
-    'left join rule_version_check_digest rvcd2 on (r.version = rvcd2.version and r.checkDigest = rvcd2.checkDigest)',
     'left join rev_group_rule_map rgr on rvcd.ruleId = rgr.ruleId',
     'left join revision on rgr.revId = revision.revId',
     'left join result on r.resultId = result.resultId',
