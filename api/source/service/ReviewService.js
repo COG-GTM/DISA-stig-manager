@@ -558,34 +558,25 @@ Generalized queries for review(s).
 **/
 exports.getReviews = async function ({projections = [], filter = {}, grant}) {
   const ctes = [dbUtils.cteAclEffective({grantIds: grant.grantIds})]
+  ctes.push(`cteAssetLabels as (select
+      cla.assetId,
+      json_arrayagg(BIN_TO_UUID(cl.uuid,1)) as assetLabelIds,
+      json_arrayagg(json_object(
+        'labelId', BIN_TO_UUID(cl.uuid,1),
+        'name', cl.name,
+        'color', cl.color
+      )) as assetLabels
+    from
+      collection_label_asset_map cla
+      left join collection_label cl on cla.clId = cl.clId
+    group by
+      cla.assetId)`)
   const hints = ['NO_MERGE(cae)']
   const columns = [
     'CAST(r.assetId as char) as assetId',
     'a.name as "assetName"',
-    `coalesce(
-      (select
-        json_arrayagg(BIN_TO_UUID(cl.uuid,1))
-      from
-        collection_label_asset_map cla
-        left join collection_label cl on cla.clId = cl.clId
-      where
-        cla.assetId = r.assetId),
-      json_array()
-    ) as assetLabelIds`,
-    `coalesce(
-      (select
-        json_arrayagg(json_object(
-          'labelId', BIN_TO_UUID(cl.uuid,1),
-          'name', cl.name,
-          'color', cl.color
-        ))
-      from
-        collection_label_asset_map cla
-        left join collection_label cl on cla.clId = cl.clId
-      where
-        cla.assetId = r.assetId),
-      json_array()
-    ) as assetLabels`,
+    'coalesce(any_value(cal.assetLabelIds), json_array()) as assetLabelIds',
+    'coalesce(any_value(cal.assetLabels), json_array()) as assetLabels',
     'r.ruleId',
     `coalesce(cast(concat('[', group_concat(distinct concat('"',rvcd2.ruleId,'"')), ']') as json), json_array()) as ruleIds`,
     'result.api as "result"',
@@ -629,6 +620,7 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
     'left join default_rev dr on (rgr.revId = dr.revId and a.collectionId = dr.collectionId)',
     'left join enabled_collection c on a.collectionId = c.collectionId',
     'left join stig_asset_map sa on (r.assetId = sa.assetId and revision.benchmarkId = sa.benchmarkId)',
+    'left join cteAssetLabels cal on r.assetId = cal.assetId',
   ]
 
   if (grant.roleId === 1) {
