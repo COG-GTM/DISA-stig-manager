@@ -558,42 +558,27 @@ Generalized queries for review(s).
 **/
 exports.getReviews = async function ({projections = [], filter = {}, grant}) {
   const ctes = [dbUtils.cteAclEffective({grantIds: grant.grantIds})]
+  ctes.push(`cteAssetLabels as (select
+      cla.assetId,
+      json_arrayagg(BIN_TO_UUID(cl.uuid,1)) as assetLabelIds,
+      json_arrayagg(json_object(
+        'labelId', BIN_TO_UUID(cl.uuid,1),
+        'name', cl.name,
+        'color', cl.color
+      )) as assetLabels
+    from
+      collection_label_asset_map cla
+      left join collection_label cl on cla.clId = cl.clId
+    group by
+      cla.assetId)`)
   const hints = ['NO_MERGE(cae)']
   const columns = [
     'CAST(r.assetId as char) as assetId',
     'a.name as "assetName"',
-    `coalesce(
-      (select
-        json_arrayagg(BIN_TO_UUID(cl.uuid,1))
-      from
-        collection_label_asset_map cla
-        left join collection_label cl on cla.clId = cl.clId
-      where
-        cla.assetId = r.assetId),
-      json_array()
-    ) as assetLabelIds`,
-    `coalesce(
-      (select
-        json_arrayagg(json_object(
-          'labelId', BIN_TO_UUID(cl.uuid,1),
-          'name', cl.name,
-          'color', cl.color
-        ))
-      from
-        collection_label_asset_map cla
-        left join collection_label cl on cla.clId = cl.clId
-      where
-        cla.assetId = r.assetId),
-      json_array()
-    ) as assetLabels`,
+    'coalesce(any_value(cal.assetLabelIds), json_array()) as assetLabelIds',
+    'coalesce(any_value(cal.assetLabels), json_array()) as assetLabels',
     'r.ruleId',
-    `(select
-        coalesce(cast(concat('[', group_concat(distinct concat('"',rvcdr.ruleId,'"')), ']') as json), json_array())
-      from
-        rule_version_check_digest rvcdr
-      where
-        rvcdr.version = r.version and rvcdr.checkDigest = r.checkDigest
-    ) as ruleIds`,
+    `coalesce(cast(concat('[', group_concat(distinct concat('"',rvcd2.ruleId,'"')), ']') as json), json_array()) as ruleIds`,
     'result.api as "result"',
     'CASE WHEN r.resultEngine = 0 THEN NULL ELSE r.resultEngine END as resultEngine',
     "COALESCE(LEFT(r.detail,32767),'') as detail",
@@ -624,6 +609,7 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
   const joins = [
     'review r',
     'left join rule_version_check_digest rvcd on (r.version = rvcd.version and r.checkDigest = rvcd.checkDigest)',
+    'left join rule_version_check_digest rvcd2 on (r.version = rvcd2.version and r.checkDigest = rvcd2.checkDigest)',
     'left join rev_group_rule_map rgr on rvcd.ruleId = rgr.ruleId',
     'left join revision on rgr.revId = revision.revId',
     'left join result on r.resultId = result.resultId',
@@ -634,6 +620,7 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
     'left join default_rev dr on (rgr.revId = dr.revId and a.collectionId = dr.collectionId)',
     'left join enabled_collection c on a.collectionId = c.collectionId',
     'left join stig_asset_map sa on (r.assetId = sa.assetId and revision.benchmarkId = sa.benchmarkId)',
+    'left join cteAssetLabels cal on r.assetId = cal.assetId',
   ]
 
   if (grant.roleId === 1) {
@@ -802,8 +789,7 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
     }
   }
 
-  const orderBy = ['r.reviewId']
-  const sql = dbUtils.makeQueryString({ctes, hints, columns, joins, predicates, groupBy, orderBy, format: true})
+  const sql = dbUtils.makeQueryString({ctes, hints, columns, joins, predicates, groupBy, format: true})
   const [rows] = await dbUtils.pool.query(sql)
   return (rows)
 }
