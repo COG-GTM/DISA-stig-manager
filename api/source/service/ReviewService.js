@@ -802,7 +802,8 @@ exports.getReviews = async function ({projections = [], filter = {}, grant}) {
     }
   }
 
-  const sql = dbUtils.makeQueryString({ctes, hints, columns, joins, predicates, groupBy, format: true})
+  const orderBy = ['r.reviewId']
+  const sql = dbUtils.makeQueryString({ctes, hints, columns, joins, predicates, groupBy, orderBy, format: true})
   const [rows] = await dbUtils.pool.query(sql)
   return (rows)
 }
